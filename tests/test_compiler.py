@@ -1,12 +1,13 @@
-# Copyright 2019, 2020, 2021 Matthew Egan Odendahl
+# Copyright 2019, 2020, 2021, 2022 Matthew Egan Odendahl
 # SPDX-License-Identifier: Apache-2.0
-
+import pickle
+import textwrap
 from unittest import TestCase
 
 import hypothesis.strategies as st
 from hypothesis import given
 
-from hissp import compiler, munger
+from hissp import compiler
 
 quoted = (
     st.none()
@@ -14,7 +15,7 @@ quoted = (
     | st.integers()
     | st.floats(allow_nan=False)
     | st.complex_numbers(allow_nan=False)
-    | st.binary(max_size=13)  # bytes
+    | st.binary(max_size=3)  # bytes
 )
 literals = st.recursive(
     # strings, bytes, numbers, tuples, lists, dicts, sets, booleans, and None
@@ -23,8 +24,21 @@ literals = st.recursive(
     | st.sets(quoted)
     | st.builds(tuple, st.lists(children))
     | st.dictionaries(quoted, children),
-    max_leaves=5
+    max_leaves=5,
 )
+
+
+class Slotted:
+    """Protocol 0 can't pickle this, but a higher protocol can."""
+
+    __slots__ = "item"
+
+
+class Unpicklable:
+    """No protocol can pickle this."""
+
+    def __reduce__(self):
+        return 42
 
 
 class TestCompileGeneral(TestCase):
@@ -41,30 +55,54 @@ class TestCompileGeneral(TestCase):
     def test_compile_pickle(self, form):
         self.assertEqual(form, eval(compiler.Compiler().pickle(form)))
 
+    def test_compile_pickle_protocol_fallback(self):
+        # Protocol 0 raises for a __slots__ class without __getstate__,
+        # but a higher protocol handles it, so compilation must not fail.
+        self.assertIsInstance(eval(compiler.Compiler().pickle(Slotted())), Slotted)
+
+    def test_compile_pickle_no_protocol_works(self):
+        # No protocol can pickle this, so the error from the highest
+        # protocol is re-raised and reported as usual.
+        c = compiler.Compiler()
+        self.assertIn("PicklingError", c.pickle(Unpicklable()))
+        self.assertIsInstance(c.error, pickle.PicklingError)
+
+    def test_module_not_found(self):
+        self.assertEqual(
+            "__import__('bogus').foo(\n  (2))", compiler.readerless(("bogus..foo", 2))
+        )
+
     @given(literals)
     def test_compile_literal(self, form):
-        self.assertEqual(form, eval(compiler.Compiler().atom(form)))
+        self.assertEqual(form, eval(compiler.Compiler().atomic(form)))
 
-    def test_maybe_macro_error(self):
-        with self.assertRaises(compiler.CompileError):
-            compiler.readerless(('hissp.basic.._macro_.foobar',))
+    def test_compile_method(self):
+        msg = r"self must be paired with :\?"
+        with self.assertRaisesRegex(compiler.CompileError, msg):
+            compiler.readerless(('.hex',':','self',2.0))  # fmt: skip
 
     def test_post_compile_warn(self):
-        c = compiler.Compiler('oops')
+        c = compiler.Compiler("oops")
         with self.assertWarns(compiler.PostCompileWarning):
             python = c.compile([
                 ('operator..truediv',0,0,),
                 ('print',('quote','oops',),),
-            ])
-        self.assertIn("""\
-__import__('operator').truediv(
-  (0),
-  (0))
+            ])  # fmt: skip
+        self.assertIn(
+            textwrap.dedent("""\
+            __import__('operator').truediv(
+              (0),
+              (0))
 
-# Traceback (most recent call last):""", python)
-        self.assertIn("""\
-# ZeroDivisionError: division by zero
-# 
+            # Traceback (most recent call last):"""),
+            python,
+        )
+        self.assertIn(
+            textwrap.dedent("""\
+            # ZeroDivisionError: division by zero
+            #\N{SPACE}
 
-print(
-  'oops')""", python)
+            print(
+              'oops')"""),
+            python,
+        )

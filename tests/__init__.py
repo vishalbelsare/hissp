@@ -1,4 +1,5 @@
-from hissp.reader import transpile
+# Copyright 2026 Matthew Egan Odendahl
+# SPDX-License-Identifier: Apache-2.0
+import hissp
 
-transpile("hissp", "basic")
-transpile(__package__, "test_basic")
+hissp.transpile(__package__, "test_macros")

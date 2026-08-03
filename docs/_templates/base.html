@@ -1,0 +1,48 @@
+<!--
+Copyright 2022, 2023 Matthew Egan Odendahl
+SPDX-License-Identifier: Apache-2.0
+-->
+{% extends '!base.html' %}
+
+{% block extrahead %}
+<style type="text/css">
+/* Contrast Tweaks for Monokai Theme */
+.highlight .gh {
+  color: hsl(212deg, 30%, 96%);
+  font-weight: bold;
+}
+.highlight .gu {
+  color: hsl(212deg, 9%, 58%);
+  font-style: italic;
+}
+.highlight .c {
+  color: hsl(212deg, 9%, 58%)
+}
+.highlight .c1 {
+  color: hsl(212deg, 9%, 58%)
+}
+.highlight {
+  background: #0d1117
+}
+</style>
+<style type="text/css">
+/* Dark-Theme Contrast Tweaks for Monokai Theme */
+body:not([data-theme="light"]) .highlight .gh {
+  color: hsl(212deg, 30%, 96%);
+  font-weight: bold;
+}
+body:not([data-theme="light"]) .highlight .gu {
+  color: hsl(212deg, 9%, 58%);
+  font-style: italic;
+}
+body:not([data-theme="light"]) .highlight .c {
+  color: hsl(212deg, 9%, 58%)
+}
+body:not([data-theme="light"]) .highlight .c1 {
+  color: hsl(212deg, 9%, 58%)
+}
+body:not([data-theme="light"]) .highlight {
+  background: #0d1117
+}
+</style>
+{% endblock %}

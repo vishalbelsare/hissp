@@ -1,4 +1,4 @@
-# Copyright 2019, 2020, 2021 Matthew Egan Odendahl
+# Copyright 2019, 2020, 2021, 2022 Matthew Egan Odendahl
 # SPDX-License-Identifier: Apache-2.0
 import re
 from unittest import TestCase
@@ -20,10 +20,10 @@ class TestMunger(TestCase):
 
     def test_munge_basic(self):
         self.assertEqual(
-            munger.munge(r"""~!@#$%^&*()_+{}|:"<>?`-=[]\;',./"""),
-            "QzTILDE_QzBANG_QzAT_QzHASH_QzDOLR_QzPCENT_QzCARET_QzET_QzSTAR_QzLPAR_QzRPAR_"
-            "_QzPLUS_QzLCUB_QzRCUB_QzBAR_QzCOLON_QzQUOT_QzLT_QzGT_QzQUERY_QzGRAVE_Qz_QzEQ_"
-            "QzLSQB_QzRSQB_QzBSOL_QzSEMI_QzAPOS_QzCOMMA_.QzSOL_"
+            munger.munge(R"""~!@#$%^&*()_+{}|:"<>?`-=[]\;',./"""),
+            "Tilde_Bang_At_Hash_Dolr_Pcent_Hat_Et_Star_Lpar_"
+            "Rpar__Plus_Lcub_Rcub_Vert_Colon_Quot_Lt_Gt_Eh_"
+            "Grave____Eq_Lsqb_Rsqb_Bsol_Scoln_Apos_Comma_.Fsol_",
         )
 
     @given(st.text(st.characters(whitelist_categories=["Sm"]), min_size=1))
@@ -31,9 +31,9 @@ class TestMunger(TestCase):
         self.assertTrue(munger.munge(s).isidentifier())
 
     @given(st.characters(whitelist_categories=["Lu", "Ll", "Lt", "Nl", "Sm"]))
-    def test_un_qz_quote(self, char):
-        x = munger.qz_encode(char)
+    def test_decode(self, char):
+        x = munger.encode(char)
         self.assertTrue(("x" + x).isidentifier())
         match = re.fullmatch("x(.*?)_", x)
         if match:
-            self.assertEqual(char, munger._qz_decode(match))
+            self.assertEqual(char, munger._decode(match))

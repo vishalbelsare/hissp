@@ -1,4 +1,6 @@
-(hissp.basic.._macro_.prelude)
+;;; Copyright 2020, 2024 Matthew Egan Odendahl
+;;; SPDX-License-Identifier: Apache-2.0
+(hissp..prelude)
 
 (print sys..argv)
 (print .#"f'{__name__=} {__package__=}'")

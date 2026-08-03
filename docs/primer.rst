@@ -1,29 +1,16 @@
-.. Copyright 2019, 2020, 2021 Matthew Egan Odendahl
+.. Copyright 2019, 2020, 2021, 2022, 2023, 2024 Matthew Egan Odendahl
    SPDX-License-Identifier: CC-BY-SA-4.0
 
-..  Hidden doctest requires basic macros for REPL-consistent behavior.
-   #> (operator..setitem (globals) '_macro_ (types..SimpleNamespace : :** (vars hissp.basic.._macro_)))
-   >>> __import__('operator').setitem(
-   ...   globals(),
-   ...   '_macro_',
-   ...   __import__('types').SimpleNamespace(
-   ...     **vars(
-   ...         __import__('hissp.basic',fromlist='?')._macro_)))
+.. Hidden doctest adds bundled macros for REPL-consistent behavior.
+   >>> class _macro_(__import__('hissp')._macro_):0
 
-========
-Tutorial
-========
+Hissp Primer
+############
 
-Metaprogramming
-  Writing code that writes code.
-
-Hissp is designed with metaprogramming in mind.
+Hissp is designed with :term:`metaprogramming` in mind:
+you can write code to help write your code.
 Unlike most programming languages,
-Hissp is not made of text, but data: Abstract Syntax Trees (AST).
-
-Abstract Syntax Tree
-  A type of intermediate tree data structure used by most compilers
-  after parsing a programming language.
+Hissp is not made of text, but data: :term:`Abstract Syntax Tree`\ s (AST).
 
 You've been writing AST all along, albeit indirectly.
 To understand code at all, in any programming language,
@@ -46,38 +33,86 @@ programmatically.
 In Hissp, you write in this parsed form far more directly:
 *Hissp code is AST.*
 
+Some familiarity with Python is assumed for the primer.
+If you get confused or stuck,
+see the `discussions page <https://github.com/gilch/hissp/discussions>`_
+or the `Hissp community chat <https://gitter.im/hissp-lang/community>`_.
+
 Installation
 ============
 
-Hissp requires Python 3.8+ and has no other dependencies.
+Hissp requires Python 3.10+ and has no other dependencies.
 
-Install the Hissp version matching this document with::
+Confirm your Python version with
 
-   $ pip install git+https://github.com/gilch/hissp
+.. code-block:: console
 
+   $ python -V
+
+(Re-)install the Hissp version matching this document with
+
+.. RELEASE: Rewrite to install from PyPI.
+
+.. code-block:: console
+
+   $ python -m pip install --upgrade --force-reinstall git+https://github.com/gilch/hissp
+
+These docs are for the latest development version of Hissp.
+Most examples are tested automatically,
+but details may be dated.
+
+Report issues or try the current release version instead.
+
+More details about :ref:`installing-index`, :ref:`Python versions <whatsnew-index>`
+(or :ref:`implementations`),
+and :term:`virtual environment`\ s may be helpful,
+but are beyond the scope of this document.
 
 Hello World
 ===========
 
-A Hissp program is made of Python objects in tuples
-which represent the syntax tree structure.
+A Hissp program is made of :term:`form`\ s:
+Python objects (:term:`atom`\ s) in tuples
+which represent the syntax tree structure:
 
 >>> hissp_program = (
-...     ('lambda',('name',),
-...      ('print',('quote','Hello',),'name',),)
+...     ('lambda',('name',)
+...      ,('print',('quote','Hello',),'name',),)
 ... )
+
+The styling may look a little strange,
+but this is written in Python.
+The ``hissp_program`` is just nested tuples containing strings::
+
+   hissp_program = (
+       "lambda",
+       ("name",),
+       (
+           "print",
+           (
+               "quote",
+               "Hello",
+           ),
+           "name",
+       ),
+   )
+
+But it's representing the Hissp language,
+so there are reasons (covered in the `style_guide`)
+why we style it that way.
 
 You can invoke the Hissp compiler directly from Python.
 The `readerless()` function takes a Hissp program as input,
 and returns its Python translation as a string.
 
->>> from hissp.compiler import readerless
+>>> from hissp import readerless
 >>> python_translation = readerless(hissp_program)
 >>> print(python_translation)
 (lambda name:
-  print(
-    'Hello',
-    name))
+    print(
+      'Hello',
+      name)
+)
 
 Python can then run this program as normal.
 
@@ -88,23 +123,23 @@ Let's break this Hissp program down.
 Notice that the first element of each tuple designates its function.
 
 In the case of ``('print',('quote','Hello',),'name',)``,
-the first element represents a call to the `print()<print>` function.
+the first element represents a call to the :func:`print()` function.
 The remaining elements are the arguments.
 
-The interpretation of the `lambda form <hissp.compiler.Compiler.function>` is a special case.
+The interpretation of the `lambda form <lambda_>` is a special case.
 It represents a lambda expression, rather than a function call.
 ``('name',)`` is its parameters tuple.
 The remainder is its body.
 
 Note that ``'name'`` became an identifier in the Python translation,
-but the ``('quote','Hello',)`` expression became a string.
+but the ``('quote','Hello',)`` expression became a string literal.
 That's the interpretation of ``quote``:
 its argument is seen as "data" rather than code by the compiler.
 
-Together, ``lambda`` and ``quote`` are the only `special forms <hissp.compiler.Compiler.special>`
+Together, ``lambda`` and ``quote`` are the only :term:`special form`\ s
 known to the compiler.
 There are ways to define more forms with special interpretations,
-called "macros", which is how Hissp gets much of its expressive power.
+called :term:`macro`\ s, which is how Hissp gets much of its expressive power.
 
 ``('quote','Hello',)`` seems a little verbose compared to its Python
 translation.
@@ -127,15 +162,16 @@ Code is writing code!
 Let's use it.
 
 >>> readerless(
-...     ('lambda',('name'),
-...      ('print',q('Hello'),'name',),)
+...     ('lambda',('name')
+...      ,('print',q('Hello'),'name',),)
 ... )
-"(lambda n,a,m,e:\n  print(\n    'Hello',\n    name))"
+"(lambda n, a, m, e:\n    print(\n      'Hello',\n      name)\n)"
 >>> print(_)  # Remember, _ is the last result that wasn't None.
-(lambda n,a,m,e:
-  print(
-    'Hello',
-    name))
+(lambda n, a, m, e:
+    print(
+      'Hello',
+      name)
+)
 >>> eval(_)('World')
 Traceback (most recent call last):
   File "<stdin>", line 1, in <module>
@@ -145,10 +181,15 @@ What happened?
 
 Look at the compiled Python.
 Our ``q()`` worked as expected,
-but there are too many parameters in the lambda because we forgot the comma in ``('name')``.
-Lambda doesn't care what kind of iterable you use for its parameters,
+but there are too many parameters in the lambda because
+we forgot the comma in ``('name')``:
+in Python, ``('name')`` is just a string literal,
+but we wanted the tuple ``'name',``.
+
+The lambda special form doesn't care what kind of :term:`iterable` you use for its
+:term:`params` argument,
 as long as it yields appropriate elements in appropriate order.
-We could have used a list, for example.
+We could have used a `list`, for example.
 This flexibility can make metaprogramming easier,
 but mutable collections are not recommended.
 Python strings are iterables yielding their characters,
@@ -159,23 +200,25 @@ so the characters ``n``, ``a``, ``m``, and ``e`` got compiled to the parameters.
    it's best to think of commas as *terminators*,
    rather than *separators*, to avoid this kind of problem.
    In Python, (except for the empty tuple ``()``)
-   it is the *comma* that creates a tuple, **not** the parentheses.
+   it is the *comma* that creates a tuple, **not** the parentheses!
    The parentheses only control evaluation order.
-   There are some contexts where tuples don't require parentheses at all.
+   There are some contexts in the Python language where tuples don't
+   require parentheses at all.
 
 Let's try that again,
 with the comma this time.
 
 >>> readerless(
-...     ('lambda',('name',),
-...      ('print',q('Hello'),'name',),)
+...     ('lambda',('name',)
+...      ,('print',q('Hello'),'name',),)
 ... )
-"(lambda name:\n  print(\n    'Hello',\n    name))"
+"(lambda name:\n    print(\n      'Hello',\n      name)\n)"
 >>> print(_)
 (lambda name:
-  print(
-    'Hello',
-    name))
+    print(
+      'Hello',
+      name)
+)
 
 That's better.
 
@@ -196,31 +239,18 @@ They're ephemeral; they only live in memory.
 If Hissp is the spoken word, we need a written word.
 And to "speak" the written word back into Hissp, we need a *reader*.
 Hissp comes with a :mod:`hissp.reader` module that interprets a lightweight
-language called *Lissp* as Hissp code.
+text language called `Lissp` as Hissp code.
 
-Lissp is made of text.
+Lissp code is made of text.
 Lissp is to the written word as Hissp is to the spoken word.
 When you are writing Lissp, you are still writing Hissp.
 
-Lissp
-  A lightweight textual language representing Hissp,
-  as defined by :mod:`hissp.reader`.
-
-Lissp also includes *reader macros*,
+The Lissp language also adds :term:`tagging token`\ s,
 that act like the ``q()`` example:
 metaprogramming abbreviations.
-
-Reader macro
-  An abbreviation used by the reader.
-  These are not part of the Hissp language proper,
-  but rather are functions that *expand* to Hissp;
-  They run at *read time* and return Hissp code.
-
-.. _read time:
-
-Read time
-  The pre-compile phase that translates Lissp to Hissp:
-  when the reader runs.
+These are not part of the Hissp language proper,
+but rather are :term:`metaprogram`\ s that write Hissp;
+They run at :term:`read time` and return Hissp code.
 
 Let's see our "Hello World" example in Lissp:
 
@@ -236,17 +266,15 @@ There are no commas to miss, because there are no commas at all.
 As you can see, the Hissp structure is exactly the same as before.
 But now you don't have to quote identifiers either.
 
-The ``'`` is a built-in reader macro that acts just like the ``q()``
+The ``'`` is the :term:`hard quote`,
+a :term:`special tag` built in to the `reader` that acts just like the ``q()``
 function we defined earlier: it wraps the next expression in a ``quote`` form.
 
 The REPL
---------
+::::::::
 
 Hissp comes with its own interactive command-line interface,
-called the Lissp REPL.
-
-REPL
-  Read-Evaluate-Print Loop.
+called the Lissp :term:`REPL`.
 
 You can launch the REPL from Python code (which is useful for debugging,
 like `code.interact`),
@@ -261,7 +289,7 @@ you can use the installed entry point script::
 
 You should see the Lissp prompt ``#>`` appear.
 
-You can quit with ``(exit)`` or EOF [#EOF]_.
+You can quit with ``(exit)`` or `EOF`.
 
 Follow along with the examples by typing them into the Lissp REPL.
 Try variations that occur to you.
@@ -273,23 +301,54 @@ which it will enter into the Python interpreter ``>>>`` for you.
 Then Python will evaluate it and print a result as normal.
 
 Data Elements of Lissp
-----------------------
+::::::::::::::::::::::
 
 Hissp has special behaviors for Python's `tuple` and `str` types.
 Everything else is just data,
 and Hissp does its best to compile it that way.
 
+In Lissp, the Hissp `tuple` and `str` elements
+are written with ``()`` and ``||``, respectively.
+The :term:`str atom`\ s represent :term:`Python fragment`\ s,
+so the ``||`` :term:`token`\ s in Lissp are called :term:`fragment token`\ s.
+
+Lissp has full generality with just these two elements,
+although some things would be awkward.
+Here's our first Hissp program again written that way:
+
+.. code-block:: REPL
+
+   #> (|lambda| (|name|)
+   #..  (|print| (|quote| |Hello|) |name|))
+   >>> (lambda name:
+   ...     print(
+   ...       'Hello',
+   ...       name)
+   ... )
+   <function <lambda> at 0x...>
+
+   #> (|_| (|quote| |World|))
+   >>> _(
+   ...   'World')
+   Hello World
+
+Notice that the fragments are interpreted in different ways depending on the context.
+``|lambda|`` is a special instruction to the Hissp compiler.
+``|print|`` is a fragment of Python code, an identifier in this case,
+but basically any Python expression works.
+``|Hello|`` is a string.
+
 In addition to the special behaviors from the Hissp level for tuple
 and string lexical elements,
-the Lissp level has special behavior for *reader macros*.
+the Lissp level has special behavior for :term:`tagging token`\ s.
 (And ignores things like whitespace and comments.)
 Everything else is an *atom*,
 which is passed through to the Hissp level with minimal processing.
 
 Basic Atoms
-###########
++++++++++++
 
-Most literals work just like Python:
+Most :term:`literal token`\ s work just like Python:
 
 .. code-block:: REPL
 
@@ -320,138 +379,124 @@ Most literals work just like Python:
    #> None ; These don't print.
    >>> None
 
-Comments, as one might expect, are discarded by the reader,
+:term:`Comment token`\ s, as one might expect, are discarded by the reader,
 and do not appear in the output.
 
 .. code-block:: REPL
 
-   #> ;; Use two ';'s if it starts the line.
+   #> ;; Use two ';'s when it's positioned like a form.
+   #..;;; Use three for top-level commentary not attached to anything.
+   #..;;;; Four for headers. See the style guide for details.
+   #..
    >>>
 
 
-Raw Strings
-###########
+Strings
++++++++
 
-Hash strings and raw strings represent text data,
-but are lexically distinct from the other atoms,
-and have somewhat different behavior.
-
-*Raw strings* in Lissp are double-quoted and read backslashes and newlines literally,
-which makes them similar to triple-quoted r-strings in Python.
-In other words, escape sequences are not processed.
+You've already seen how to make strings from :term:`fragment`\ s: you quote them.
 
 .. code-block:: REPL
 
-   #> "Two
-   #..lines\ntotal"
-   >>> ('Two\nlines\\ntotal')
-   'Two\nlines\\ntotal'
+   #> (|quote| |Hello|)
+   >>> 'Hello'
+   'Hello'
 
-   #> (print _)
+We've already seen that the reader has a built-in shorthand for quotation.
+
+.. code-block:: REPL
+
+   #> '|Hello|
+   >>> 'Hello'
+   'Hello'
+
+If that particular fragment weren't quoted in this context,
+it would be interpreted as a Python identifier instead.
+
+Although you can escape a ``|`` by doubling it,
+the text of a :term:`fragment token` is otherwise raw:
+the characters in the token become the characters in the :term:`fragment atom`.
+You can't use Python's escape sequences for special characters.
+
+.. code-block:: REPL
+
+   #> '|Say "Cheese!"\n\u263a|
+   >>> 'Say "Cheese!"\\n\\u263a'
+   'Say "Cheese!"\\n\\u263a'
+
+If you do want the escapes,
+the solution, of course,
+is to not quote it
+and put a Python string literal
+(a :term:`Python fragment`)
+in the fragment token.
+This is another way to make strings using fragments.
+
+.. code-block:: REPL
+
+   #> |"Say \"Cheese!\"\n\u263a"| ; There is a reason we used double quotes.
+   >>> "Say \"Cheese!\"\n\u263a"
+   'Say "Cheese!"\n☺'
+
+   #> (|print| |_|)
    >>> print(
    ...   _)
-   Two
-   lines\ntotal
+   Say "Cheese!"
+   ☺
 
-Do note, however, that the `tokenizer <Lexer>` still expects backslashes to be paired with another character.
-
-.. code-block:: REPL
-
-   #> "\"
-   #..\\" ; One string, not two!
-   >>> ('\\"\n\\\\')
-   '\\"\n\\\\'
-
-   #> (print _)
-   >>> print(
-   ...   _)
-   \"
-   \\
-
-The second double-quote character didn't end the raw string,
-but the backslash "escaping" it was still read literally.
-The third double quote did end the string despite being adjacent to a backslash,
-because that was already paired with another backslash.
-Again, this is the same as Python's r-strings.
-
-Recall that the Hissp-level `str` type is used to represent Python identifiers in the compiled output,
-and must be quoted with the ``quote`` special form to represent text data instead.
-
->>> readerless(
-...     ('print',  # str containing identifier
-...      ('quote','hi'),)  # string as data
-... )
-"print(\n  'hi')"
->>> eval(_)
-hi
-
-Hissp-level strings can represent almost any Python code to include in the compiled output,
-not just identifiers.
-So another way to represent text data in Hissp
-is a Hissp-level string that contains the Python code for a string literal.
-
->>> readerless(
-...     ('print',  # str containing identifier
-...      '"hi"',)  # str containing a string literal
-... )
-'print(\n  "hi")'
->>> eval(_)
-hi
-
-Quoting our entire example shows us how that Lissp would get translated to Hissp.
-(When quoted, it's just data.)
+And, in fact, the reader has a shorthand for this already.
+If you've got a fragment surrounded by double quotes (``"``), you can drop the ``||``.
+This is called a :term:`Unicode token`.
 
 .. code-block:: REPL
 
-   #> (quote
-   #..  (lambda (name)
-   #..    (print "Hello" name)))
-   >>> ('lambda',
-   ...  ('name',),
-   ...  ('print',
-   ...   "('Hello')",
-   ...   'name',),)
-   ('lambda', ('name',), ('print', "('Hello')", 'name'))
+   #> "Say \"Cheese!\"
+   #..\u263a" ; Note the parentheses.
+   >>> ('Say "Cheese!"\n☺')
+   'Say "Cheese!"\n☺'
 
-This tuple is data, but it's also valid Hissp code.
-You could pass it to `readerless()` to get working Python code:
+This doesn't work for single quotes,
+because those are reserved for the reader's :term:`hard quote`.
+Also notice that you're allowed a literal newline
+(and the ``\n`` escape sequence also works),
+like in Python's triple-quoted strings.
+This is a convenience not currently allowed in the
+``||``-delimited :term:`fragment token`\ s.
 
->>> readerless(('lambda', ('name',), ('print', "('Hello')", 'name')))
-"(lambda name:\n  print(\n    ('Hello'),\n    name))"
->>> print(_)
-(lambda name:
-  print(
-    ('Hello'),
-    name))
-
-Notice the raw string reader syntax
-``"Hello"`` produced a string in the Hissp output containing
-``('Hello')``, a Python string literal,
-which saved us a ``quote`` form.
-
-Hash Strings
-############
-
-You can enable the processing of Python's backslash escape sequences
-by prefixing the raw string syntax with a hash ``#``.
-These are called *hash strings*.
+Unicode tokens don't simply read as :term:`str atom`\ s like
+:term:`fragment token`\ s!
+Don't think of them like the :term:`literal token`\ s.
+They're reader shorthand for a particular kind of :term:`fragment atom`:
+one containing a Python string literal.
+If you expect them to represent themselves in the Hissp when you quote them,
+you will be confused.
 
 .. code-block:: REPL
 
-   #> #"Three
-   #..lines\ntotal"
-   >>> ('Three\nlines\ntotal')
-   'Three\nlines\ntotal'
+   #> '"foo"
+   >>> "('foo')"
+   "('foo')"
 
-   #> (print _)
-   >>> print(
-   ...   _)
-   Three
-   lines
-   total
+``'"foo"`` is a shorthand for ``|('foo')|``.
 
-Symbols
-#######
+This also applies to Unicode tokens quoted indirectly through a tuple.
+See the difference?
+
+.. code-block:: REPL
+
+   #> '("foo" |bar|)
+   >>> ("('foo')",
+   ...  'bar',)
+   ("('foo')", 'bar')
+
+Symbol Tokens
++++++++++++++
+
+:term:`Symbol`\ s are meant for variable names and the like.
+If you have a :term:`fragment token` containing a valid Python identifier,
+you can drop the ``||``.
+This is called a :term:`symbol token`.
+They're another reader shorthand.
 
 In our basic example:
 
@@ -461,10 +506,9 @@ In our basic example:
      (print 'Hello name))
 
 ``lambda``, ``name``, ``print``, ``Hello``, and
-``name`` are *symbols*.
+``name`` are symbol tokens.
 
-Symbols are meant for variable names and the like.
-Quoting our example again to see how Lissp would get read as Hissp,
+Quoting our example to see how Lissp would get read as Hissp,
 
 .. code-block:: REPL
 
@@ -479,23 +523,23 @@ Quoting our example again to see how Lissp would get read as Hissp,
    ...   'name',),)
    ('lambda', ('name',), ('print', ('quote', 'Hello'), 'name'))
 
-we see that there are *no symbol objects* at the Hissp level.
-The Lissp symbols are read in as strings.
+we see that there is no distinct symbol type at the Hissp level.
+A :term:`symbol` is just a special case of :term:`str atom` with particular contents:
+the subset that can act as identifiers.
 
 In other Lisps, symbols are a data type in their own right,
-but symbols only exist as a *reader syntax* in Lissp,
-where they represent the subset of Hissp-level strings that can act as identifiers.
+but Python has no built-in symbol type
+and instead uses strings pervasively whenever it has to represent identifiers.
 
-Symbols in Lissp become strings in Hissp which become identifiers in Python,
-unless they're quoted, like ``('quote', 'Hello',)``,
-in which case they become string literals in Python.
-
-Experiment with this process in the REPL.
+In summary,
+symbol tokens in Lissp become `str` atoms in Hissp which become identifiers in Python,
+unless they're quoted,
+in which case they're interpreted as data and become string literals in Python.
 
 Attributes
-~~~~~~~~~~
+----------
 
-Symbols can have internal ``.``'s to access attributes.
+Symbols can have internal ``.``\ s to access attributes, same as Python.
 
 .. code-block:: REPL
 
@@ -507,21 +551,19 @@ Symbols can have internal ``.``'s to access attributes.
    >>> int.__name__.__class__
    <class 'str'>
 
-.. _qualified identifiers:
-
-Module Literals and Qualified Identifiers
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Module Handles and Qualified Identifiers
+----------------------------------------
 
 You can refer to variables defined in any module by using a
-*qualified identifier*:
+:term:`fully qualified identifier`:
 
 .. code-block:: REPL
 
-   #> operator. ; Module literals end in a dot and automatically import.
+   #> operator. ; Module handles end in a dot and automatically import.
    >>> __import__('operator')
    <module 'operator' from '...operator.py'>
 
-   #> (operator..add 40 2) ; Qualified identifiers include their module.
+   #> (operator..add 40 2) ; Fully qualified identifiers include their module.
    >>> __import__('operator').add(
    ...   (40),
    ...   (2))
@@ -529,7 +571,7 @@ You can refer to variables defined in any module by using a
 
 Notice the second dot required to access a module attribute.
 
-The translation of module literals to ``__import__`` calls happens at compile time,
+The translation of module handles to ``__import__`` calls happens at compile time,
 not read time, so this feature is still available in readerless mode.
 
 >>> readerless('re.')
@@ -539,15 +581,16 @@ Qualification is important for macros that are defined in one module,
 but used in another.
 
 Munging
-~~~~~~~
+-------
 
-Symbols have another important difference from raw strings:
+:term:`Symbol token`\ s have another important difference from
+:term:`fragment token`\ s:
 
 .. code-block:: REPL
 
-   #> 'foo->bar? ; Qz_ is for "Hyphen", QzGT_ for "Greater Than/riGhT".
-   >>> 'fooQz_QzGT_barQzQUERY_'
-   'fooQz_QzGT_barQzQUERY_'
+   #> 'foo->bar? ; Gt_ for "Greater Than/riGhT".
+   >>> 'foo___Gt_barEh_'
+   'foo___Gt_barEh_'
 
    #> "foo->bar?"
    >>> ('foo->bar?')
@@ -555,9 +598,9 @@ Symbols have another important difference from raw strings:
 
 Because symbols may contain special characters,
 but the Python identifiers they represent cannot,
-the reader `munges <munge>` symbols with forbidden characters
-to valid identifier strings by replacing them with special "Quotez"
-escape sequences, like ``QzFULLxSTOP_``.
+the reader `munge`\ s symbols with forbidden characters
+to valid identifier strings by replacing them with special :term:`Quotez`
+escape sequences, like ``QzDIGITxONE_``.
 
 This "Quotez" format was chosen because it contains an underscore
 and both lower-case and upper-case letters,
@@ -568,7 +611,7 @@ This makes it easy to tell if an identifier contains munged characters,
 which makes `demunging<demunge>` possible in the normal case.
 It also cannot introduce a leading underscore,
 which can have special meaning in Python.
-It might have been simpler to use the character's `ord()<ord>`,
+It might have been simpler to use the character's :func:`ord()`,
 but it's important that the munged symbols still be human-readable.
 
 The "Qz" bigram is almost unheard of in English text,
@@ -576,7 +619,8 @@ and "Q" almost never ends a word (except perhaps in brand names),
 making "Qz" a visually distinct escape sequence,
 easy to read, and very unlikely to appear by accident.
 
-Munging happens at `read time`_, which means you can use a munged symbol both
+:term:`Munging` happens at :term:`read time`,
+which means you can use a munged symbol both
 as an identifier and as a string representing that identifier:
 
 .. code-block:: REPL
@@ -590,26 +634,28 @@ as an identifier and as a string representing that identifier:
    #..         42)
    >>> setattr(
    ...   _,
-   ...   'QzAT_QzPCENT_QzDOLR_QzBANG_',
+   ...   'At_Pcent_Dolr_Bang_',
    ...   (42))
 
    #> _
    >>> _
-   namespace(QzAT_QzPCENT_QzDOLR_QzBANG_=42)
+   namespace(At_Pcent_Dolr_Bang_=42)
 
    #> _.@%$! ; Munges and compiles to attribute identifier.
-   >>> _.QzAT_QzPCENT_QzDOLR_QzBANG_
+   >>> _.At_Pcent_Dolr_Bang_
    42
 
-Spaces, double quotes, parentheses, and semicolons are allowed in atoms,
-but they must each be escaped with a backslash to prevent it from terminating the symbol.
+Spaces, double quotes, parentheses,
+and semicolons are allowed in :term:`bare token`\ s,
+but, because they look like a new `token`,
+they must each be escaped with a backslash to prevent it from terminating.
 (Escape a backslash with another backslash.)
 
 .. code-block:: REPL
 
    #> 'embedded\ space
-   >>> 'embeddedQzSPACE_space'
-   'embeddedQzSPACE_space'
+   >>> 'embeddedSpace_space'
+   'embeddedSpace_space'
 
 Python does not allow some characters to start an identifier that it allows inside identifiers,
 such as digits.
@@ -618,25 +664,38 @@ You may have to escape these if they begin a symbol to distinguish them from num
 .. code-block:: REPL
 
    #> '\108
-   >>> 'QzDIGITxONE_08'
-   'QzDIGITxONE_08'
+   >>> 'DigitXoneX_08'
+   'DigitXoneX_08'
 
 Notice that only the first digit had to be munged to make it a valid Python identifier.
 
 .. code-block:: REPL
 
    #> '1o8 ; Clearly not a number, so no escape required.
-   >>> 'QzDIGITxONE_o8'
-   'QzDIGITxONE_o8'
+   >>> 'DigitXoneX_o8'
+   'DigitXoneX_o8'
+
+By the way, since a :term:`symbol token`
+can read as a :term:`symbol` with a :term:`module handle`,
+special characters in the package/module name part also get munged.
+They will then attempt to import modules with funny names,
+which only works if you have modules with said names available for import.
+Just saying.
 
 Control Words
-~~~~~~~~~~~~~
+-------------
 
-Atoms that begin with a colon are called *control words* [#key]_.
-These are mainly used to give internal structure to macro invocations—You
+A :term:`str atom` that begins with a colon is called a :term:`control word`.
+In Lissp, they don't need the ``||``\ s either.
+This is called a :term:`control token`.
+But they're allowed.
+A :term:`fragment token` reads its characters directly into a :term:`str atom`,
+so one beginning with ``|:`` does read as a control word.
+
+Control words are mainly used to give internal structure to macro invocations—you
 want a word distinguishable from a string at compile time,
-but it's not meant to be a Python identifier.
-Thus, they do not get munged:
+but it's not meant to be a Python identifier like symbols are.
+Thus, they do not get :term:`munged<munging>` like symbols would:
 
 .. code-block:: REPL
 
@@ -644,9 +703,21 @@ Thus, they do not get munged:
    >>> ':foo->bar?'
    ':foo->bar?'
 
-Control words compile to string literals that begin with ``:``,
-so you usually don't need to quote them,
-but you can:
+Like most types of :term:`form`\ s,
+and unlike other :term:`str atom`\ s,
+A control word normally represents and evaluates to itself,
+even if it's not quoted.
+
+But the lambda :term:`special form`,
+as well as certain :term:`macro`\ s,
+use certain "active"
+control words as syntactic elements to *control* the interpretation of other elements,
+hence the name.
+
+Some control words are also "active" in normal function calls,
+(like ``:**`` for :term:`keyword argument` unpacking, covered later.)
+To pass them as data in that context,
+quote it,
 
 .. code-block:: REPL
 
@@ -654,7 +725,8 @@ but you can:
    >>> ':foo->bar?'
    ':foo->bar?'
 
-Note that you can do nearly the same thing with a raw string:
+or use a :term:`string literal fragment` instead
+(here made using a :term:`Unicode token`):
 
 .. code-block:: REPL
 
@@ -662,30 +734,28 @@ Note that you can do nearly the same thing with a raw string:
    >>> (':foo->bar?')
    ':foo->bar?'
 
-The lambda special form,
-as well as certain macros,
-use certain "active"
-control words as syntactic elements to *control* the interpretation of other elements,
-hence the name.
-
-Some control words are also "active" in normal function calls,
-(like ``:**`` for dict unpacking, covered later.)
-You must quote these like ``':**`` or ``":**"`` to pass them as data in that context.
-
 Macros operate at compile time (before evaluation),
-so they can also distinguish a raw control word from a quoted one.
+so they can also distinguish a raw control word
+(a :term:`str atom` that begins with a ``:``)
+from a quoted one (a :term:`quote` :term:`special form`, which is a tuple),
+or string literal fragment
+(also a str atom, but doesn't begin with a ``:``.)
 
 Compound Expressions
---------------------
+::::::::::::::::::::
 
-Atoms are just the basic building blocks.
+:term:`Atom`\ s are just the basic building blocks.
 To do anything interesting with them,
 you have to combine them into syntax trees using tuples.
 
 Empty
-#####
++++++
 
-The empty tuple ``()`` might as well be an atom:
+Despite its type, the empty tuple ``()`` is considered an :term:`atom`.
+Like most types of :term:`form`\ s,
+and unlike other tuples,
+it represents and evaluates to itself,
+even if it's not quoted:
 
 .. code-block:: REPL
 
@@ -694,18 +764,17 @@ The empty tuple ``()`` might as well be an atom:
    ()
 
 Lambdas
-#######
++++++++
 
 The anonymous function special form::
 
-   (lambda <parameters>
+   (lambda <params>
      <body>)
 
 Python's parameter types are rather involved.
 Hissp's lambdas have a simplified format designed for metaprogramming.
-When the parameters tuple [#LambdaList]_
-starts with a colon,
-then all parameters are paired.
+When the :term:`params tuple` starts with a colon,
+then all parameters are pairs, implied by position.
 Hissp can represent all of Python's parameter types this way.
 
 .. code-block:: REPL
@@ -720,30 +789,42 @@ Hissp can represent all of Python's parameter types this way.
    #..         h 4 ; parameters after * are keyword only
    #..         i :? ; kwonly with no default
    #..         j 1 ; another kwonly parameter with a default value
-   #..         :** kwargs) ; packs keyword args into a dict
+   #..         ;; ** packs keyword args into a dict
+   #..         :** kwargs)
    #..  42)
-   >>> (lambda a,/,b,e=(1),f=(2),*args,h=(4),i,j=(1),**kwargs:(42))
+   >>> (
+   ...  lambda a,
+   ...         /,
+   ...         b,
+   ...         e=(1),
+   ...         f=(2),
+   ...         *args,
+   ...         h=(4),
+   ...         i,
+   ...         j=(1),
+   ...         **kwargs:
+   ...     (42))
    <function <lambda> at ...>
 
 The parameter name goes on the left of the pairs, and the default goes on the right.
-Notice that the ``:?`` control word indicates that the parameter has no default value.
+Notice that the ``:?`` :term:`control word` indicates that the parameter has no default value.
 
-The ``:/`` separator ending the positional-only arguments is not a parameter,
+The ``:/`` separator ending the positional-only parameters is not a parameter,
 even though it gets listed like one,
 thus it can't have a default
 and must always be paired with ``:?``.
 
-The ``:*`` can likewise act as a separator starting the keyword-only arguments,
+The ``:*`` can likewise act as a separator starting the keyword-only parameters,
 and can likewise be paired with ``:?``.
 
-The normal parameters in between these can be passed in either as positional arguments
-or as keyword arguments.
+The normal parameters between these can be passed in either as positional arguments
+or as keyword arguments (kwargs).
 
 The ``:*`` can instead pair with a parameter name,
 which collects the remainder of the positional arguments into a tuple.
 This is one of two exceptions to the rule that the parameter name is the left of the pair.
-This matches Python's ordering.
-Notice that this means that the rule that the ``:?`` goes on the right has no exceptions.
+This matches Python's ordering,
+and means the rule that the ``:?`` goes on the right has no exceptions.
 The other exception is the parameter name after ``:**``,
 which collects the remaining keyword arguments into a dict.
 
@@ -758,14 +839,25 @@ of a pair with a ``:?``.
    #..         :* args  h 4  i :?  j 1 ; kwonly
    #..         :** kwargs)
    #..  42)
-   >>> (lambda a,/,b,e=(1),f=(2),*args,h=(4),i,j=(1),**kwargs:(42))
+   >>> (
+   ...  lambda a,
+   ...         /,
+   ...         b,
+   ...         e=(1),
+   ...         f=(2),
+   ...         *args,
+   ...         h=(4),
+   ...         i,
+   ...         j=(1),
+   ...         **kwargs:
+   ...     (42))
    <function <lambda> at ...>
 
 Each element before the ``:`` is implicitly paired with
 the placeholder control word ``:?``.
 Notice the Python compilation is exactly the same as before,
-and that a ``:?`` was still required in the paired section to indicate that the
-``i`` parameter has no default value.
+and that a ``:?`` was still required in the pairs section (after the ``:``)
+to indicate that the ``i`` parameter has no default value.
 
 The ``:*`` and ``:**`` control words mark their parameters as
 taking the remainder of the positional and keyword arguments,
@@ -773,16 +865,17 @@ respectively:
 
 .. code-block:: REPL
 
-   #> (lambda (: :* args :** kwargs)
+   #> (lambda (: :* args  :** kwargs)
    #..  (print args)
    #..  (print kwargs) ; Body expressions evaluate in order.
    #..  42) ; The last value is returned.
-   >>> (lambda *args,**kwargs:(
-   ...   print(
-   ...     args),
-   ...   print(
-   ...     kwargs),
-   ...   (42))[-1])
+   >>> (lambda *args, **kwargs:
+   ...    (print(
+   ...       args),
+   ...     print(
+   ...       kwargs),
+   ...     (42))  [-1]
+   ... )
    <function <lambda> at ...>
 
    #> (_ 1 : b :c)
@@ -793,23 +886,29 @@ respectively:
    {'b': ':c'}
    42
 
-You can omit the right of any pair with ``:?`` except the final ``**kwargs``.
+You can omit the right of any pair with ``:?`` except the ``**kwargs``.
 
 The lambda body can be empty,
-in which case an empty tuple is implied:
+in which case an empty tuple is implied.
+
+Positional-only parameters with defaults must appear after the ``:``,
+which forces the ``:/`` into the pairs side.
+Everything on the pairs side must be paired, no exceptions.
+(Even though ``:/`` can only pair with ``:?``,
+adding another special case to not require the ``:?``
+would make metaprogramming more difficult.)
 
 .. code-block:: REPL
 
    #> (lambda (: a 1  :/ :?  :* :?  b :?  c 2))
-   >>> (lambda a=(1),/,*,b,c=(2):())
+   >>> (
+   ...  lambda a=(1),
+   ...         /,
+   ...         *,
+   ...         b,
+   ...         c=(2):
+   ...     ())
    <function <lambda> at ...>
-
-Positional-only parameters with defaults must appear after the ``:``,
-which forces the ``:/`` into the paired side.
-Everything on the paired side must be paired, no exceptions.
-(Even though ``:/`` can only be paired with ``:?``,
-adding another special case to not require the ``:?``
-would make metaprogramming more difficult.)
 
 The ``:`` may be omitted if there are no explicitly paired parameters.
 Not having it is the same as putting it last:
@@ -817,19 +916,23 @@ Not having it is the same as putting it last:
 .. code-block:: REPL
 
    #> (lambda (a b c :)) ; No pairs after ':'.
-   >>> (lambda a,b,c:())
+   >>> (lambda a, b, c: ())
    <function <lambda> at ...>
 
    #> (lambda (a b c)) ; The ':' was omitted.
-   >>> (lambda a,b,c:())
+   >>> (lambda a, b, c: ())
    <function <lambda> at ...>
 
    #> (lambda (:)) ; Colon isn't doing anything.
-   >>> (lambda :())
+   >>> (lambda : ())
    <function <lambda> at ...>
 
    #> (lambda ()) ; You can omit it.
-   >>> (lambda :())
+   >>> (lambda : ())
+   <function <lambda> at ...>
+
+   #> (lambda :) ; This also works (guess why), and is idiomatic in Lissp.
+   >>> (lambda : ())
    <function <lambda> at ...>
 
 The ``:`` is required if there are any explicit pairs,
@@ -838,25 +941,25 @@ even if there are no ``:?`` pairs:
 .. code-block:: REPL
 
    #> (lambda (: :** kwargs))
-   >>> (lambda **kwargs:())
+   >>> (lambda **kwargs: ())
    <function <lambda> at ...>
 
 Calls
-#####
++++++
 
-Any tuple that is not quoted, empty, or a special form or macro is
+Any tuple that is not quoted, empty, or a :term:`special form` or :term:`macro` is
 a run-time call.
 
-The first element of a call tuple is the callable.
+The first element of a call tuple represents the :term:`callable`.
 The remaining elements are for the arguments.
 
 Like lambda's parameters tuple,
 when you start the arguments with ``:``,
-the rest are paired.
+the rest are pairs, implied by position.
 
 .. code-block:: REPL
 
-   #> (print : :? 1  :? 2  :? 3  sep ":"  end #"\n.")
+   #> (print : :? 1  :? 2  :? 3  sep ":"  end "\n.")
    >>> print(
    ...   (1),
    ...   (2),
@@ -878,13 +981,13 @@ this means that the ``:?`` is always the left of a pair.
 Like lambdas, the ``:`` is a convenience abbreviation for ``:?`` pairs,
 giving call forms three parts::
 
-   (<callable> <single> : <paired>)
+   (<callable> <singles> : <pairs>)
 
 For example:
 
 .. code-block:: REPL
 
-   #> (print 1 2 3 : sep ":"  end #"\n.")
+   #> (print 1 2 3 : sep ":"  end "\n.")
    >>> print(
    ...   (1),
    ...   (2),
@@ -896,7 +999,7 @@ For example:
 
 Notice the Python compilation is exactly the same as before.
 
-The single and the paired section may be empty:
+The singles or the pairs section may be empty:
 
 .. code-block:: REPL
 
@@ -915,7 +1018,7 @@ The single and the paired section may be empty:
    ...   end=('X'))
    X
 
-The ``:`` is optional if the paired section is empty:
+The ``:`` is optional if the pairs section is empty:
 
 .. code-block:: REPL
 
@@ -930,14 +1033,14 @@ The ``:`` is optional if the paired section is empty:
 
 Again, this is like lambda.
 
-The paired section has implicit pairs; there must be an even number.
+The pairs section has implicit pairs; there must be an even number of elements.
 
 Use the control words ``:*`` for iterable unpacking,
 ``:?`` to pass by position, and ``:**`` for keyword unpacking:
 
 .. code-block:: REPL
 
-   #> (print : :* '(1 2)  :? 3  :* '(4)  :** (dict : sep :  end #"\n."))
+   #> (print : :* '(1 2)  :? 3  :* '(4)  :** (dict : sep :  end "\n."))
    >>> print(
    ...   *((1),
    ...     (2),),
@@ -957,7 +1060,7 @@ but (as in Python) a ``:*`` is not allowed to follow ``:**``.
 
 Method calls are similar to function calls::
 
-   (.<method name> <self> <single> : <paired>)
+   (.<method name> <self> <singles> : <pairs>)
 
 Like Clojure, a method on the first "argument" (``<self>``) is assumed if the
 function name starts with a dot:
@@ -968,28 +1071,39 @@ function name starts with a dot:
    >>> (1j).conjugate()
    -1j
 
-Reader Macros
--------------
+To make metaprogramming easier, the ``:`` can go before the ``<self>`` as well,
+but must be paired with a ``:?``.
 
-Up until now, Lissp has been a pretty direct representation of Hissp.
-Metaprogramming changes that.
+.. code-block:: REPL
 
-So far, all of our Hissp examples written in readerless mode
+   #> (.conjugate : :? 1j)
+   >>> (1j).conjugate()
+   -1j
+
+Tagging Tokens
+::::::::::::::
+
+Up to this point, the Lissp examples have been a pretty direct representation of Hissp.
+:term:`Metaprogramming` changes that.
+
+So far, all of our Hissp examples written in :term:`readerless mode`
 have been tuple trees with string leaves,
 
 >>> eval(readerless(('print','1','2','3',':','sep',':')))
 1:2:3
 
-but the Hissp compiler will accept other object types.
+but the Hissp compiler will accept other types of atoms.
 
 >>> eval(readerless((print,1,2,3,':','sep',':')))
 1:2:3
 
-Tuples represent invocations in Hissp,
-strings are Python code (and imports and control words).
-Other objects simply represent themselves.
+Tuples represent invocations in Hissp.
+:term:`Str atom`\ s are :term:`fragment atom`\ s,
+:term:`symbol`\ s (including :term:`module handle`\ s),
+or :term:`control word`\ s.
+Other :term:`form`\ s simply represent themselves.
 In fact,
-some of the reader syntax we have already seen creates non-string objects in the Hissp.
+some of the reader syntax we have already seen creates non-string atoms in the Hissp.
 
 .. code-block:: REPL
 
@@ -1005,7 +1119,8 @@ some of the reader syntax we have already seen creates non-string objects in the
 
 In this case, we can see the integer objects were not read as strings.
 
-Consider how easily you can programmatically manipulate Hissp before compiling it if you write it in Python.
+Consider how easily you can programmatically manipulate Hissp
+before compiling it if you write it in Python:
 
 >>> ('print',q('hello, world!'.title()))
 ('print', ('quote', 'Hello, World!'))
@@ -1015,12 +1130,13 @@ Hello, World!
 Here, we changed a lowercase string to title case before the compiler even saw it.
 
 Are we giving up this kind of power by using Lissp instead?
+No, that's why we have :term:`tagging token`\ s.
 
-Inject
-######
+Inject Tag
+++++++++++
 
 Remember our first metaprogram ``q()``?
-You've already seen the ``'`` reader macro.
+You've already seen the ``'`` :term:`special tag`.
 That much is doable.
 
 Here's how you could do the rest.
@@ -1042,31 +1158,35 @@ Let's quote the whole form to see the intermediate Hissp.
    ...   'Hello, World!',),)
    ('print', ('quote', 'Hello, World!'))
 
-Notice the title casing method has already been applied.
+Notice the `str.title` method has already been applied,
+changing the "H" and "W" case.
 Just like our Python example,
-this ran a program to help generate the Hissp before passing it to the compiler.
+this ran a :term:`metaprogram`
+to help generate the Hissp before passing it to the compiler.
 
-The ``.#`` is another built-in reader macro called *inject*.
-It compiles and evaluates the next form
+The ``.#`` is a :term:`special tag` called the :term:`inject tag`.
+It compiles and evaluates the next :term:`parsed object` at :term:`read time`,
 and is replaced with the resulting object in the Hissp.
-Reader macros are unary operators that apply inside-out,
-like functions do,
-at `read time`_.
+`tagging token`\ s are unary operators that apply inside-out,
+like functions do.
+The ``'.#`` means the inject tag is applied first,
+then the :term:`quote` to its result.
 
-You can use inject to modify code at read time,
-to inject non-string objects that don't have their own reader syntax in Lissp,
-and to inject Python code strings by evaluating the reader syntax that would normally add quotation marks.
+You can use the inject tag to modify code at read time,
+to make :term:`atom` types that don't have their own reader syntax in Lissp,
+or to make a :term:`fragment atom` from any parsed object that evaluates to a string,
+including the result of a :term:`Unicode token`.
 It's pretty important.
 
 Python injection:
 
 .. code-block:: REPL
 
-   #> .##"{(1, 2): \"\"\"buckle my shoe\"\"\"}  # This is Python!"
+   #> .#"{(1, 2): \"\"\"buckle my shoe\"\"\"}  # This is Python!"
    >>> {(1, 2): """buckle my shoe"""}  # This is Python!
    {(1, 2): 'buckle my shoe'}
 
-Reader macros compose inside-out:
+`Tagging token`\ s compose inside-out:
 
 .. code-block:: REPL
 
@@ -1098,11 +1218,11 @@ Keeping the phases of compilation straight can be confusing.
 
 .. code-block:: REPL
 
-   #> '"{(1, 2): 'buckle my shoe'}" ; quoted raw string contains a Python literal
+   #> '"{(1, 2): 'buckle my shoe'}" ; quoted Unicode token contains a Python literal
    >>> '("{(1, 2): \'buckle my shoe\'}")'
    '("{(1, 2): \'buckle my shoe\'}")'
 
-   #> '.#"{(3, 4): 'shut the door'}" ; quoted injected raw contains a dict
+   #> '.#"{(3, 4): 'shut the door'}" ; quoted injected Unicode contains a dict
    >>> "{(3, 4): 'shut the door'}"
    "{(3, 4): 'shut the door'}"
 
@@ -1111,18 +1231,18 @@ Keeping the phases of compilation straight can be confusing.
    {(5, 6): 'pick up sticks'}
 
 Still confused?
-Remember, inject compiles the next parsed object as Hissp,
+Remember, :term:`inject` compiles the next parsed object as Hissp,
 evaluates it as Python,
 then is replaced with the resulting object.
-Let's look at this process in readerless mode,
+Let's look at this process in :term:`readerless mode`,
 so we can see some intermediate values.
 
 >>> '("{(3, 4): \'shut the door\'}")'  # next parsed object
 '("{(3, 4): \'shut the door\'}")'
->>> eval(readerless(_))  # The inject. Innermost reader macro first.
+>>> eval(readerless(_))  # The inject. Innermost tagging token first.
 "{(3, 4): 'shut the door'}"
->>> eval(readerless(_))  # Then the quote.
-{(3, 4): 'shut the door'}
+>>> eval(readerless(q(_)))  # Then the quote.
+"{(3, 4): 'shut the door'}"
 
 With one inject the result was a string object.
 
@@ -1146,21 +1266,22 @@ How about these?
    [[], [], []]
 
    #> .#.#"[[]]*3" ; Injects a list object.
-   >>> __import__('pickle').loads(  # [[], [], []]
-   ...     b'(l(lp0\nag0\nag0\na.'
-   ... )
+   >>> # [[], [], []]
+   ... __import__('pickle').loads(b'(l(lp0\nag0\nag0\na.')
    [[], [], []]
 
+Surprised?
 What's with the `pickle.loads` expression?
 It seems to produce the right object.
 Is this the reader's doing?
+Let's check.
 
 >>> readerless('[[]]*3')
 '[[]]*3'
 >>> eval(_)
 [[], [], []]
 >>> readerless([[]]*3)
-"__import__('pickle').loads(  # [[], [], []]\n    b'(l(lp0\\nag0\\nag0\\na.'\n)"
+"# [[], [], []]\n__import__('pickle').loads(b'(l(lp0\\nag0\\nag0\\na.')"
 >>> eval(_)
 [[], [], []]
 
@@ -1188,9 +1309,8 @@ Well, what *should* it compile to?
    [[7], [], []]
 
    #> .#.#"[[]]*3"
-   >>> __import__('pickle').loads(  # [[], [], []]
-   ...     b'(l(lp0\nag0\nag0\na.'
-   ... )
+   >>> # [[], [], []]
+   ... __import__('pickle').loads(b'(l(lp0\nag0\nag0\na.')
    [[], [], []]
 
    #> (.append (operator..getitem _ 0) 7)
@@ -1206,7 +1326,8 @@ Well, what *should* it compile to?
 It's three references to the same list, not to three lists.
 The pickle expression could produce an equivalent object graph,
 even though the literal notation can't.
-Objects in Hissp that aren't strings or tuples are supposed to evaluate to themselves.
+:term:`Form`\ s in Hissp that aren't strings or tuples are supposed to evaluate to themselves.
+
 In theory,
 there are an infinite number of Python expressions that would produce an equivalent object.
 (In practice, computers do not have infinite memory.)
@@ -1218,9 +1339,9 @@ It might not be the one you started with.
 'print(\n  (10),\n  (10),\n  (10),\n  (10),\n  (10),\n  (10),\n  (10),\n  (10),\n  (10))'
 
 Notice that these have all compiled the same way: ``(10)``.
-There were many possible representations in code,
+There were many possible aliases in code,
 but by the time the compiler got to them,
-they were just references to an int object in memory,
+they were just references to an `int` object in memory,
 and there is no way for the compiler to know what code you started with.
 
 When an object has a Python literal representation,
@@ -1245,20 +1366,20 @@ If you tried to run
 
 .. code-block:: Python
 
-    readerless((<built-in function print>, 1, 2, 3, ':', 'sep', ':'))
+   readerless((<built-in function print>, 1, 2, 3, ':', 'sep', ':'))
 
 then you'd get a syntax error.
+Try it, if you'd like.
 
 How can the Hissp compiler generate Python code from this tuple?
 
 Let's see what it's doing.
 
 >>> readerless((print,1,2,3,':','sep',':'))
-"__import__('pickle').loads(  # <built-in function print>\n    b'cbuiltins\\nprint\\n.'\n)(\n  (1),\n  (2),\n  (3),\n  sep=':')"
+"# <built-in function print>\n__import__('pickle').loads(b'c__builtin__\\nprint\\n.')(\n  (1),\n  (2),\n  (3),\n  sep=':')"
 >>> print(_)
-__import__('pickle').loads(  # <built-in function print>
-    b'cbuiltins\nprint\n.'
-)(
+# <built-in function print>
+__import__('pickle').loads(b'c__builtin__\nprint\n.')(
   (1),
   (2),
   (3),
@@ -1268,20 +1389,19 @@ __import__('pickle').loads(  # <built-in function print>
 
 It's using pickle again,
 and because of that, this code still works,
-even though the `print` function does not have a literal notation.
+even though the :func:`print()` function does not have a literal notation.
 
 When we tried this in the obvious way in Lissp,
-`print` used the symbol reader syntax,
-which became a string in the Hissp,
+`print` was written as a :term:`symbol token`,
+which became a :term:`str atom` in the Hissp,
 and rendered as an identifier in the compiled Python,
 but if we had injected it instead,
 
 .. code-block:: REPL
 
    #> (.#print 1 2 3 : sep :)
-   >>> __import__('pickle').loads(  # <built-in function print>
-   ...     b'cbuiltins\nprint\n.'
-   ... )(
+   >>> # <built-in function print>
+   ... __import__('pickle').loads(b'c__builtin__\nprint\n.')(
    ...   (1),
    ...   (2),
    ...   (3),
@@ -1295,9 +1415,8 @@ Many other object types work.
 .. code-block:: REPL
 
    #> .#(fractions..Fraction 1 2)
-   >>> __import__('pickle').loads(  # Fraction(1, 2)
-   ...     b'cfractions\nFraction\n(V1/2\ntR.'
-   ... )
+   >>> # Fraction(1, 2)
+   ... __import__('pickle').loads(b'cfractions\nFraction\n(V1/2\ntR.')
    Fraction(1, 2)
 
 Unfortunately, there are some objects even pickle can't handle.
@@ -1313,45 +1432,50 @@ Unfortunately, there are some objects even pickle can't handle.
 
 Hissp had to give up with an error this time.
 
-Qualified Reader Macros
-#######################
+.. TIP::
+   The third-party `Dill <https://pypi.org/project/dill/>`_
+   library can pickle more types.
+   Set :mod:`hissp.compiler`'s ``pickle`` attribute to the ``dill`` module to enable.
 
-Besides a few built-ins,
-reader macros in Lissp consist of a symbol ending with a ``#``,
-followed by another form.
+Tags
+++++
 
-A function named by a qualified identifier is invoked on the form,
-and the reader embeds the resulting object into the output Hissp:
+Besides a few :term:`special tag`\ s,
+:term:`tagging token`\ s in Lissp consist of a special symbol ending with ``#``\ s,
+called a :term:`tag`,
+followed by additional argument forms.
+
+A function named by a :term:`fully qualified identifier` is invoked on the form,
+and the reader embeds the resulting object into the output Hissp
+(this is called a :term:`fully qualified tag`):
 
 .. code-block:: REPL
 
    #> builtins..float#inf
-   >>> __import__('pickle').loads(  # inf
-   ...     b'Finf\n.'
-   ... )
+   >>> # inf
+   ... __import__('pickle').loads(b'Finf\n.')
    inf
 
-This inserts an actual `float` object at `read time`_ into the Hissp code.
+This inserts an actual `float` object at :term:`read time` into the Hissp code.
 
-It's the same as using inject like this
+It's the same as using :term:`inject` like this
 
 .. code-block:: REPL
 
    #> .#(float 'inf)
-   >>> __import__('pickle').loads(  # inf
-   ...     b'Finf\n.'
-   ... )
+   >>> # inf
+   ... __import__('pickle').loads(b'Finf\n.')
    inf
 
-Or readerless mode like this
+Or in :term:`readerless mode` like this
 
 >>> readerless(float('inf'))
-"__import__('pickle').loads(  # inf\n    b'Finf\\n.'\n)"
+"# inf\n__import__('pickle').loads(b'Finf\\n.')"
 
-A float is neither a `str` nor a `tuple`,
+A `float` is neither a `str` nor a `tuple`,
 so Hissp tries its best to compile this as data representing itself,
-but because its repr, ``inf``, isn't a valid Python literal,
-it has to compile to a pickle instead.
+but because its `repr`, ``inf``, isn't a valid Python literal,
+it has to compile to a :term:`pickle expression` instead.
 But if it's used by something *before* compile time,
 like another macro, then it won't have been serialized yet.
 
@@ -1367,7 +1491,7 @@ While unpickling does have some overhead,
 it may be worth it if constructing the object normally has even more.
 Naturally, the object must be picklable to emit a pickle.
 
-Qualified reader macros don't always result in pickles though.
+Fully qualified tags don't always result in pickles though.
 
 .. code-block:: REPL
 
@@ -1381,22 +1505,123 @@ this might be a clearer way of expressing the number 81.
 (In other circumstances,
 other representations,
 like ``0x51`` could be better.)
-If you evaluate it at read time like this,
+If you evaluate it at :term:`read time` like this,
 then there is no run-time overhead for the alternative notation,
 because it's compiled to ``(81)``,
 just like there's no run-time overhead for using a hex literal instead of decimal in Python.
 
-Reader macros can also be unqualified.
-These three macros are built into the reader:
-Inject ``.#``, discard ``_#``, and gensym ``$#``.
-The reader will also check the current module's ``_macro_`` namespace (if it has one)
-for attributes ending in ``#`` (i.e. ``QzHASH_``)
-when it encounters an unqualified reader macro name.
+Multiary Tags
++++++++++++++
 
-Discard
-#######
+:term:`Tag`\ s may take multiple arguments.
+You indicate how many with the number of trailing ``#``\ s.
 
-The discard ``_#`` macro omits the next expression,
+.. code-block:: REPL
+
+   #> fractions..Fraction#|2/3| ; Two thirds.
+   >>> # Fraction(2, 3)
+   ... __import__('pickle').loads(b'cfractions\nFraction\n(V2/3\ntR.')
+   Fraction(2, 3)
+
+   #> fractions..Fraction## 2 3 ; Notice the extra #.
+   >>> # Fraction(2, 3)
+   ... __import__('pickle').loads(b'cfractions\nFraction\n(V2/3\ntR.')
+   Fraction(2, 3)
+
+Tags may also take keyword arguments,
+made with a :term:`kwarg token` ending in ``=``,
+which can be helpful quick refinements for functions with optional arguments,
+without the need to create a new metaprogram for each specialization.
+
+.. code-block:: REPL
+
+   #> builtins..int#|21| ; Normal base ten
+   >>> (21)
+   21
+
+   #> builtins..int## |21| base=6 ; base 6, via base= kwarg. Note ##.
+   >>> (13)
+   13
+
+   #> builtins..int## base=6 |21| ; kwargs are allowed in any argument position
+   >>> (13)
+   13
+
+A kwarg token works a lot like a tag, except it ends with a single ``=``
+instead of some number of ``#``\ s, and can only take a single argument.
+These do evaluate to a `Kwarg` object,
+which is only meant for use as an argument to a tag,
+but they're allowed to persist after read time for debugging purposes.
+If you see one of these, make sure you used enough ``#``\ s on your tag.
+
+.. code-block:: REPL
+
+   #> base=6
+   >>> # Kwarg(k='base', v=6)
+   ... __import__('pickle').loads(b'ccopy_reg\n_reconstructor\n(chissp.reader\nKwarg\nc__builtin__\ntuple\n(Vbase\nI6\nttR.')
+   Kwarg(k='base', v=6)
+
+The :term:`stararg token`\ s ``*=`` and ``**=`` also evaluate to a `Kwarg` object
+and unpack the argument at that position,
+either as positional arguments or keyword arguments, respectively.
+
+.. code-block:: REPL
+
+   #> builtins..str.format#### "{}a{}b{}c{}:{}" *=AB C *=(1 2)
+   >>> ('AaBbCc1:2')
+   'AaBbCc1:2'
+
+Tags get :term:`parsed object`\ s from the reader. But they haven't been evaluated yet.
+Notice the ``.#``\ s required here.
+
+.. code-block:: REPL
+
+   #> builtins..sorted### reverse=True key=.#str.lower (a B c)
+   >>> ['c', 'B', 'a']
+   ['c', 'B', 'a']
+
+   ;; Tags call dict() on a **= Kwarg, so pairs work.
+   ;; Equivalent to the above. Notice the .# is still required.
+   #> builtins..sorted##**=((reverse True) (key .#str.lower)) (a B c)
+   >>> ['c', 'B', 'a']
+   ['c', 'B', 'a']
+
+   ;; Kwarg is a NamedTuple subclass, so they also count as pairs.
+   ;; We used them directly before, but they each needed a #.
+   #> builtins..sorted##**=(reverse=True key=.#str.lower) (a B c)
+   >>> ['c', 'B', 'a']
+   ['c', 'B', 'a']
+
+   ;; A mapping object works as well, of course.
+   ;; The .# makes a read-time dict object here.
+   #> builtins..sorted##**=.#(dict : reverse True  key str.lower) (a B c)
+   >>> ['c', 'B', 'a']
+   ['c', 'B', 'a']
+
+Unqualified Tags
+++++++++++++++++
+
+Sometimes tags have no :term:`qualifier`.
+
+When the reader encounters an :term:`unqualified` tag,
+it will look for and apply a corresponding :term:`metaprogram` attribute
+ending in ``#`` (i.e. ``QzHASH_``)
+in the current module's
+``_macro_`` namespace.
+
+These cannot override the :term:`special tag`\ s.
+
+The ``#`` is only in the attribute name to distinguish it from a
+:term:`macro function`,
+not to indicate arity.
+If escaped with ``\``,
+it is possible to use a tag name containing extra ``#``\ s,
+or ending in ``=``.
+
+Discard tag
++++++++++++
+
+The :term:`discard tag` (``_#``) omits the next expression,
 even if it's a tuple.
 It's a way to comment out code structurally:
 
@@ -1409,44 +1634,23 @@ It's a way to comment out code structurally:
    1 3
 
 Templates
-#########
++++++++++
 
-Besides ``'``, which we've already seen,
-and ``!``, which we'll cover later,
-Lissp has three other built-in reader macros that don't require a ``#``:
+Besides `quote` (``'``), which we've already seen,
+Lissp has three other :term:`special tag`\ s that don't require a ``#``:
 
-* ````` template quote
-* ``,`` unquote
-* ``,@`` splice unquote
+* ````` `template quote`
+* ``,`` `unquote`
+* ``,@`` `splicing unquote`
 
-The template quote works much like a normal quote:
-
-.. code-block:: REPL
-
-   #> '(1 2 3) ; quote
-   >>> ((1),
-   ...  (2),
-   ...  (3),)
-   (1, 2, 3)
-
-   #> `(1 2 3) ; template quote
-   >>> (lambda * _: _)(
-   ...   (1),
-   ...   (2),
-   ...   (3))
-   (1, 2, 3)
-
-Notice the results are the same,
-but the template quote compiles to a call that evaluates to the result,
-instead of a literal representation of the result itself.
-
-This gives you the ability to *interpolate*
+The template quote works much like a :term:`hard quote`,
+but has the ability to *interpolate*
 data into the tuple at the time it is evaluated,
 much like a format string:
 
 .. code-block:: REPL
 
-   #> '(1 2 (operator..add 1 2)) ; normal quote
+   #> '(1 2 (operator..add 1 2)) ; hard quote applies recursively to subforms
    >>> ((1),
    ...  (2),
    ...  ('operator..add',
@@ -1455,26 +1659,28 @@ much like a format string:
    (1, 2, ('operator..add', 1, 2))
 
    #> `(1 2 ,(operator..add 1 2)) ; template and unquote
-   >>> (lambda * _: _)(
+   >>> (
    ...   (1),
    ...   (2),
    ...   __import__('operator').add(
    ...     (1),
-   ...     (2)))
+   ...     (2)),
+   ...   )
    (1, 2, 3)
 
-The splice unquote is similar, but unpacks its result:
+The :term:`splicing unquote` is similar, but unpacks its result:
 
 .. code-block:: REPL
 
    #> `(:a ,@"bcd" :e)
-   >>> (lambda * _: _)(
+   >>> (
    ...   ':a',
    ...   *('bcd'),
-   ...   ':e')
+   ...   ':e',
+   ...   )
    (':a', 'b', 'c', 'd', ':e')
 
-Templates are *reader syntax*: because they're reader macros,
+Templates are *reader syntax*: because they're :term:`tagging token`\ s,
 they only exist in Lissp, not Hissp.
 They are abbreviations for the Hissp that they return.
 
@@ -1483,11 +1689,7 @@ If you quote an example, you can see that intermediate step:
 .. code-block:: REPL
 
    #> '`(:a ,@"bcd" ,(operator..mul 2 3))
-   >>> (('lambda',
-   ...   (':',
-   ...    ':*',
-   ...    ' _',),
-   ...   ' _',),
+   >>> ('',
    ...  ':',
    ...  ':?',
    ...  ':a',
@@ -1496,249 +1698,131 @@ If you quote an example, you can see that intermediate step:
    ...  ':?',
    ...  ('operator..mul',
    ...   (2),
-   ...   (3),),)
-   (('lambda', (':', ':*', ' _'), ' _'), ':', ':?', ':a', ':*', "('bcd')", ':?', ('operator..mul', 2, 3))
+   ...   (3),),
+   ...  ':?',
+   ...  '',)
+   ('', ':', ':?', ':a', ':*', "('bcd')", ':?', ('operator..mul', 2, 3), ':?', '')
 
 If we format that a little more nicely,
-then it's easier to read.
+then it's easier to read:
 
 >>> readerless(
-...     (('lambda',(':',':*',' _',),' _'),
-...      ':',':?',':a',
+...     ('',':',
+...      ':?',':a',
 ...      ':*',"('bcd')",
-...      ':?',('operator..mul', 2, 3,),)
+...      ':?',('operator..mul', 2, 3),
+...      ':?','')
 ... )
-"(lambda * _: _)(\n  ':a',\n  *('bcd'),\n  __import__('operator').mul(\n    (2),\n    (3)))"
+"(\n  ':a',\n  *('bcd'),\n  __import__('operator').mul(\n    (2),\n    (3)),\n  )"
 >>> print(_)
-(lambda * _: _)(
+(
   ':a',
   *('bcd'),
   __import__('operator').mul(
     (2),
-    (3)))
+    (3)),
+  )
 
 Templates are Lissp syntactic sugar based on what Hissp already has.
 
+See what's happening here?
+This isn't a special case in the compiler.
+It's being compiled like a normal call form.
+It turns out that "calling" the "empty identifier"
+looks like a tuple expression in Python.
+The same unpacking syntax we'd use in a call also works here.
+The final empty argument ensures there's a trailing comma,
+even if the tuple expression only has one argument.
+(Call arguments are separated with commas in the compiler,
+not terminated, so the zero argument case also works correctly.)
+
 Templates are a domain-specific language for programmatically writing Hissp code,
-making them valuable tools for metaprogramming.
-Most compiler macros will use at least one internally.
+making them valuable tools for :term:`metaprogramming`.
+Most :term:`macro function`\ s will use at least one internally.
 
 Judicious use of sugar like this can make code much easier to read and write.
 While all Turing-complete languages have the same theoretical *power*,
 they are not equally *expressive*.
 Metaprogramming makes a language more expressive.
-Reader macros are a kind of metaprogramming.
-Because you can make your own reader macros,
+Tags are a kind of metaprogramming.
+Because you can make your own tags,
 you can make your own sugar.
 
 Gensyms
-#######
++++++++
 
-The built-in reader macro ``$#`` creates a *generated symbol*
-(gensym) based on the given symbol.
+The :term:`gensym tag` (``$#``) *generates* a :term:`symbol`
+(called a :term:`gensym`) based on the given symbol.
 Within a template, the same gensym name always makes the same gensym:
 
 .. code-block:: REPL
 
    #> `($#hiss $#hiss)
-   >>> (lambda * _: _)(
-   ...   '_hiss_QzNo41_',
-   ...   '_hiss_QzNo41_')
-   ('_hiss_QzNo41_', '_hiss_QzNo41_')
+   >>> (
+   ...   '_gF6EQIPZY__hiss',
+   ...   '_gF6EQIPZY__hiss',
+   ...   )
+   ('_gF6EQIPZY__hiss', '_gF6EQIPZY__hiss')
 
-But each new template increments the counter.
+But each new template changes the prefix hash.
 
 .. code-block:: REPL
 
-   #> `$#hiss
-   >>> '_hiss_QzNo42_'
-   '_hiss_QzNo42_'
+   #> `($#hiss $#hiss)
+   >>> (
+   ...   '_gGC3RWYPQ__hiss',
+   ...   '_gGC3RWYPQ__hiss',
+   ...   )
+   ('_gGC3RWYPQ__hiss', '_gGC3RWYPQ__hiss')
 
 Gensyms are mainly used to prevent accidental name collisions in generated code,
 which is very important for reliable compiler macros.
 
-Extra
-#####
+The 40-bit hash is computed from the entire code string being read
+(the whole ``.lissp`` file)
+the module's `__name__`, and a count of the templates read so far this session.
 
-The final built-in reader macro ``!``
-is used to pass extra arguments to other reader macros.
-None of Lissp's built-in reader macros use it,
-but extras can be helpful quick refinements for functions with optional arguments,
-without the need to create a new reader macro for each specialization.
+(In the REPL, there is no ``.lissp`` file,
+so "the entire code string" is the top-level form entered.)
 
-.. code-block:: REPL
+A count alone isn't enough.
+Files can be compiled individually in different sessions,
+which would each start with a fresh counter.
+A counter alone can ensure templates have a unique name within a file,
+but not between files.
 
-   #> builtins..int#.#"21" ; normal base ten
-   >>> (21)
-   21
+Adding the module's `__name__` isn't enough either,
+since it will be re-used for multiple versions of the module.
+The code string stands in for the module version,
+without resorting to things like tedious manual versioning
+or timestamps that would prohibit reproducible builds.
+The `__name__` is still required in case different modules happen to have the same code,
+which can sometimes happen when they are very short.
 
-   #> builtins..int#!6 .#"21" ; base six via optional base arg
-   >>> (13)
-   13
-
-A reader macro can have more than one extra.
-
-Note that since extras are often optional arguments,
-they're passed in *after* the reader macro's primary argument,
-even though they're written first.
-
-.. code-block:: REPL
-
-   #> builtins..range# !0 !-1 20
-   >>> __import__('pickle').loads(  # range(20, 0, -1)
-   ...     b'cbuiltins\nrange\n(I20\nI0\nI-1\ntR.'
-   ... )
-   range(20, 0, -1)
-
-Pass in keyword arguments by pairing with a name after ``:``,
-like calls. ``:*`` and ``:**`` unpacking also work here.
-
-.. code-block:: REPL
-
-   #> builtins..int# !: !base !6 .#"21"
-   >>> (13)
-   13
-
-See the `quick start <lissp_quickstart>` for more examples.
-
-Collection Atoms
-----------------
-
-A subset of Python's data structure notation works in Lissp as well:
-
-.. code-block:: REPL
-
-   #> [1,2,3]
-   >>> [1, 2, 3]
-   [1, 2, 3]
-
-   #> {'foo':2}
-   >>> {'foo': 2}
-   {'foo': 2}
-
-You can nest these to create small, JSON-like data structures
-which can be very useful as inputs to reader macros.
-
-Tuples are different.
-Since they normally represent code,
-you must quote them to use them as data.
-
-.. sidebar:: Except for the empty tuple.
-
-   You can quote it if you want, it doesn't change the result:
-
-   .. code-block:: REPL
-
-       #> '()
-       >>> ()
-       ()
-
-       #> ()
-       >>> ()
-       ()
-
-   However, macros could distinguish these cases,
-   because they act before evaluation.
-
-.. Caution::
-   Collection atoms are tokenized like the other basic atoms.
-   The characters
-
-   .. code-block:: Text
-
-      \ \"\(\)\;\\
-
-   must be written like that,
-   with backslash escape codes,
-   even in nested string literals.
-   This includes spaces!
-   ``[1, 2, 3]`` tokenizes as three atoms.
-
-   While a significantly more complex reader could distinguish these cases without escapes
-   (as Python does), the Lissp reader's source is meant to be simple and comprehensible,
-   and Lissp doesn't really need this capability because it can already read in arbitrary
-   Python expressions using the inject macro ``.#`` applied to a string.
-   The collection atoms are just a convenience for simple cases.
-   If you need too many backslashes, it's not a "simple case".
-   Use something else.
-
-Unlike Python's notation,
-because these collections are read in as a *single atom*,
-they may contain only simple static values discernible at `read time`_:
-literals, no calls.
-
-If you want to interpolate run-time data,
-use function calls and templates instead:
-
-.. code-block:: REPL
-
-   #> (list `(,@(.upper "abc") ,@[1,2,3] ,(.title "zed")))
-   >>> list(
-   ...   (lambda * _: _)(
-   ...     *('abc').upper(),
-   ...     *[1, 2, 3],
-   ...     ('zed').title()))
-   ['A', 'B', 'C', 1, 2, 3, 'Zed']
-
-If this is still too verbose for your taste,
-remember that you can use helper functions or metaprogramming to simplify:
-
-.. code-block:: REPL
-
-   #> (.update (globals)
-   #..         : enlist
-   #..         (lambda (: :* args)
-   #..           (list args)))
-   >>> globals().update(
-   ...   enlist=(lambda *args:
-   ...            list(
-   ...              args)))
-
-   #> (enlist 'A 'B 'C (enlist 1 2 3) (.title "zed"))
-   >>> enlist(
-   ...   'A',
-   ...   'B',
-   ...   'C',
-   ...   enlist(
-   ...     (1),
-   ...     (2),
-   ...     (3)),
-   ...   ('zed').title())
-   ['A', 'B', 'C', [1, 2, 3], 'Zed']
-
-You can also use the unpacking control words in these:
-
-.. code-block:: REPL
-
-   #> (enlist : :* (.upper "abc")  :? [1,2,3]  :? (.title "zed"))
-   >>> enlist(
-   ...   *('abc').upper(),
-   ...   [1, 2, 3],
-   ...   ('zed').title())
-   ['A', 'B', 'C', [1, 2, 3], 'Zed']
+By default, the hash is a prefix,
+but you can mark some other location for it using a ``$``.
 
 Macros
 ======
 
-Hissp macros are callables that are evaluated by the compiler at
+Hissp :term:`macro`\ s are :term:`metaprogram`\ s that are evaluated by the compiler at
 *compile time*.
 
 They take the Hissp code itself as arguments (unevaluated),
 and return Hissp code as a result,
-called a *macroexpansion* (even if it gets smaller).
-The compiler inserts the expansion in the macro invocation's place in the code,
+called a :term:`macro expansion` (even if it gets smaller).
+The compiler inserts the expansion in place of the :term:`macro form` in the code,
 and then continues as normal.
-If another macro invocation appears in the expansion,
-it is expanded as well (this pattern is known as a *recursive macro*),
-which is an ability that the reader macros lack.
+If another macro form appears in the expansion,
+it is expanded as well, which is an ability that the :term:`tagging token`\ s lack.
 
-The compiler recognizes a callable as a macro if it is invoked directly
-from a ``_macro_`` namespace:
+The compiler recognizes a :term:`callable` as a macro if it is invoked directly
+from a fully qualified ``_macro_`` namespace:
 
 .. code-block:: REPL
 
-   #> (hissp.basic.._macro_.define spam :eggs) ; qualified macro
-   >>> # hissp.basic.._macro_.define
+   #> (hissp.._macro_.define spam :eggs) ; qualified macro
+   >>> # hissp.._macro_.define
    ... __import__('builtins').globals().update(
    ...   spam=':eggs')
 
@@ -1748,11 +1832,12 @@ from a ``_macro_`` namespace:
 
 The compiler will also check the current module's ``_macro_`` namespace
 (if present)
-for matching macro names when compiling an unqualified invocation.
+for matching macro names when compiling an :term:`unqualified` invocation.
 
 While ``.lissp`` files don't have one until you add it,
-the REPL automatically includes a ``_macro_``
-namespace with all of the `basic macros <hissp.basic._macro_>`:
+the :term:`REPL` (but `not subREPLs<hissp.repl.interact>`)
+automatically includes a ``_macro_``
+namespace with all of the `bundled macros <hissp.macros>`:
 
 .. code-block:: REPL
 
@@ -1782,9 +1867,10 @@ Let's try it:
    ...   _macro_,
    ...   'hello',
    ...   (lambda :
-   ...     ('print',
-   ...      ('quote',
-   ...       'hello',),)))
+   ...       ('print',
+   ...        ('quote',
+   ...         'hello',),)
+   ...   ))
 
    #> (hello)
    >>> # hello
@@ -1803,12 +1889,15 @@ Let's give it one. Use a template:
    ...   _macro_,
    ...   'greet',
    ...   (lambda name:
-   ...     (lambda * _: _)(
-   ...       'builtins..print',
-   ...       (lambda * _: _)(
-   ...         'quote',
-   ...         '__main__..Hello'),
-   ...       name)))
+   ...       (
+   ...         'builtins..print',
+   ...         (
+   ...           'quote',
+   ...           '__main__..Hello',
+   ...           ),
+   ...         name,
+   ...         )
+   ...   ))
 
    #> (greet 'Bob)
    >>> # greet
@@ -1819,9 +1908,9 @@ Let's give it one. Use a template:
 
 Not what you expected?
 
-A template quote automatically qualifies any unqualified symbols it contains
-with `builtins` (if applicable) or the current ``__name__``
-(which is ``__main__``):
+A template quote automatically fully qualifies any unqualified
+:term:`symbol`\ s it contains with `builtins` (if applicable)
+or the current ``__name__`` (which is ``__main__`` here):
 
 .. code-block:: REPL
 
@@ -1830,28 +1919,40 @@ with `builtins` (if applicable) or the current ``__name__``
    'builtins..int'
 
    #> `(int spam)
-   >>> (lambda * _: _)(
+   >>> (
    ...   'builtins..int',
-   ...   '__main__..spam')
+   ...   '__main__..spam',
+   ...   )
    ('builtins..int', '__main__..spam')
 
-Qualified symbols are especially important
+:term:`Full qualification` of symbols is especially important
 when a macro expands in a module it was not defined in.
 This prevents accidental name collisions
 when the unqualified name was already in use.
-And the qualified identifiers in the expansion will automatically import any required modules.
+Any fully qualified identifier in the expansion
+will automatically import any required module.
 
 You can force an import from a particular location by using
-a qualified symbol yourself in the template in the first place.
-Qualified symbols in templates are not qualified again.
+a fully qualified symbol yourself in the template in the first place.
+(This works automatically when using `aliases <hissp.macros._macro_.alias>`.)
+Fully qualified symbols in templates are not qualified again.
 Usually, if you want an unqualified symbol in the template's result,
-it's a sign that you need to use a gensym instead.
-(Gensyms are never qualified.)
+it's a sign that you need to use a :term:`gensym` instead.
+Symbols already "qualified" with a gensym hash prefix are considered "local" and do not get qualified with a module.
 If you don't think it needs to be a gensym,
-that's a sign that the macro could maybe be an ordinary function
-instead.
+that's a sign that the macro could maybe be an ordinary function.
 
-There are a couple of special cases worth pointing out here.
+There are a few special cases worth pointing out here.
+
+If the gensym hash is *not* in prefix position, it doesn't count as local, and gets qualified.
+
+.. code-block:: REPL
+
+   #> `$#spam.$eggs
+   >>> '__main__..spam._gKC7QNHLV__eggs'
+   '__main__..spam._gKC7QNHLV__eggs'
+
+A ``_macro_`` namespace is not the same as its module.
 
 .. code-block:: REPL
 
@@ -1860,21 +1961,20 @@ There are a couple of special cases worth pointing out here.
    ...   _macro_,
    ...   'p123',
    ...   (lambda :
-   ...     (lambda * _: _)(
-   ...       '__main__..QzMaybe_.p',
-   ...       (1),
-   ...       (2),
-   ...       (3),
-   ...       ':',
-   ...       '__main__..sep',
-   ...       ':')))
+   ...       (
+   ...         '__main__..p',
+   ...         (1),
+   ...         (2),
+   ...         (3),
+   ...         ':',
+   ...         '__main__..sep',
+   ...         ':',
+   ...         )
+   ...   ))
 
-Notice the ``QzMaybe_`` qualifying ``p``,
-which means the reader could not determine if ``p`` should be qualified as a global or as a macro,
-and the ``__main__`` qualifying ``sep``, which looks like it's going to be a problem.
-
-The ``QzMaybe_`` means that the compiler will try to resolve this symbol as a macro,
-and fall back to a global if it can't.
+Notice the ``__main__.`` module name qualifying ``sep``,
+which looks like it's going to be a problem,
+because the correct keyword doesn't have that qualifier.
 
 If we were to define a ``p`` global,
 
@@ -1898,15 +1998,22 @@ Then the ``p123`` macro works.
    ...   sep=':')
    1:2:3
 
-The compiler ignores qualifications on kwargs in normal calls to make metaprogramming easier;
-It looks like a problem, but it's not.
+The compiler ignores qualifiers on keyword arguments
+in normal calls to make metaprogramming easier;
+it looks like a problem, but it's not.
 This is fine.
 The templating system, on the other hand,
 *has to* qualify symbols, even if they might be kwargs.
 It can't tell if a tuple is going to be a normal call or a macro invocation,
 where the qualification could be necessary.
 
-We can resolve the ``QzMaybe_`` the other way by defining a ``p`` macro.
+Symbols like ``__main__..p`` refer to a `top level` variable in the named module.
+(Something like ``__main__..p.__class__`` would not be top level.)
+When such a symbol is in the `invocation position`,
+the compiler will check the module's ``_macro_`` namespace first,
+i.e., as if you had written ``__main__.._macro_.p``.
+If that is not found (or if the `_macro_` namespace for that module is not found),
+it will compile like a normal function call.
 
 .. code-block:: REPL
 
@@ -1915,13 +2022,15 @@ We can resolve the ``QzMaybe_`` the other way by defining a ``p`` macro.
    ...   _macro_,
    ...   'p',
    ...   (lambda *args:
-   ...     (lambda * _: _)(
-   ...       'builtins..print',
-   ...       *args)))
+   ...       (
+   ...         'builtins..print',
+   ...         *args,
+   ...         )
+   ...   ))
 
    #> (p123)
    >>> # p123
-   ... # __main__..QzMaybe_.p
+   ... # __main__..p
    ... __import__('builtins').print(
    ...   (1),
    ...   (2),
@@ -1929,7 +2038,7 @@ We can resolve the ``QzMaybe_`` the other way by defining a ``p`` macro.
    ...   sep=':')
    1:2:3
 
-Notice the comments indicating *two* compiler macroexpansions,
+Notice the compiler comments indicating *two* `macro expansion`\ s,
 and the use of a builtin instead of the global like last time.
 
 If you *want* to *capture* [#capture]_ an identifier (collide on purpose),
@@ -1940,19 +2049,21 @@ symbol. (Like a quoted symbol):
 .. code-block:: REPL
 
    #> `(float inf)
-   >>> (lambda * _: _)(
+   >>> (
    ...   'builtins..float',
-   ...   '__main__..inf')
+   ...   '__main__..inf',
+   ...   )
    ('builtins..float', '__main__..inf')
 
    #> `(float ,'inf)
-   >>> (lambda * _: _)(
+   >>> (
    ...   'builtins..float',
-   ...   'inf')
+   ...   'inf',
+   ...   )
    ('builtins..float', 'inf')
 
 Let's try the greet again with what we've learned about auto-qualification.
-Note the three reader macros in a row: ``','``.
+Note the three `special tag`\ s in a row: ``','``.
 
 .. code-block:: REPL
 
@@ -1961,12 +2072,15 @@ Note the three reader macros in a row: ``','``.
    ...   _macro_,
    ...   'greet',
    ...   (lambda name:
-   ...     (lambda * _: _)(
-   ...       'builtins..print',
-   ...       (lambda * _: _)(
-   ...         'quote',
-   ...         'Hello'),
-   ...       name)))
+   ...       (
+   ...         'builtins..print',
+   ...         (
+   ...           'quote',
+   ...           'Hello',
+   ...           ),
+   ...         name,
+   ...         )
+   ...   ))
 
    #> (greet 'Bob)
    >>> # greet
@@ -1977,7 +2091,7 @@ Note the three reader macros in a row: ``','``.
 
 Using a symbol here is a bit sloppy.
 If you really meant it to be text, rather than an identifier,
-a raw string might have been a better idea:
+a `Unicode token` might have been a better idea:
 
 .. code-block:: REPL
 
@@ -1986,10 +2100,12 @@ a raw string might have been a better idea:
    ...   _macro_,
    ...   'greet',
    ...   (lambda name:
-   ...     (lambda * _: _)(
-   ...       'builtins..print',
-   ...       "('Hello')",
-   ...       name)))
+   ...       (
+   ...         'builtins..print',
+   ...         "('Hello')",
+   ...         name,
+   ...         )
+   ...   ))
 
    #> (greet 'Bob)
    >>> # greet
@@ -1999,53 +2115,61 @@ a raw string might have been a better idea:
    Hello Bob
 
 While the parentheses around the 'Hello' don't change the meaning of the expression in Python,
-it does prevent the template reader macro from qualifying it like a symbol.
+it does prevent the template tag from qualifying it like a symbol.
 
 There's really no need to use a macro when a function will do.
 The above are for illustrative purposes only.
 But there are times when a function will not do:
 
+.. _anaphoric:
+
 .. code-block:: REPL
 
-   #> (setattr _macro_ '# (lambda (: :* body) `(lambda (,'#) ,body)))
+   #> (setattr _macro_ '% (lambda (: :* body) `(lambda (,'%) ,body)))
    >>> setattr(
    ...   _macro_,
-   ...   'QzHASH_',
+   ...   'Pcent_',
    ...   (lambda *body:
-   ...     (lambda * _: _)(
-   ...       'lambda',
-   ...       (lambda * _: _)(
-   ...         'QzHASH_'),
-   ...       body)))
+   ...       (
+   ...         'lambda',
+   ...         (
+   ...           'Pcent_',
+   ...           ),
+   ...         body,
+   ...         )
+   ...   ))
 
-   #> ((lambda (#)
-   #..   (print (.upper #)))              ;This lambda expression
+   #> ((lambda (%)
+   #..   (print (.upper %)))                  ;This lambda expression
    #.. "q")
-   >>> (lambda QzHASH_:
-   ...   print(
-   ...     QzHASH_.upper()))(
+   >>> (lambda Pcent_:
+   ...     print(
+   ...       Pcent_.upper())
+   ... )(
    ...   ('q'))
    Q
 
-   #> ((# print (.upper #))               ; can now be abbreviated.
-   ... "q")
-   >>> # QzHASH_
-   ... (lambda QzHASH_:
-   ...   print(
-   ...     QzHASH_.upper()))(
+   #> ((% print (.upper %))                   ; can now be abbreviated.
+   #.. "q")
+   >>> # Pcent_
+   ... (lambda Pcent_:
+   ...     print(
+   ...       Pcent_.upper())
+   ... )(
    ...   ('q'))
    Q
 
-   #> (any (map (# print (.upper #) ":" #)
+   #> (any (map (% print (.upper %) ":" %)
    #..          "abc"))
    >>> any(
    ...   map(
-   ...     # QzHASH_
-   ...     (lambda QzHASH_:
-   ...       print(
-   ...         QzHASH_.upper(),
-   ...         (':'),
-   ...         QzHASH_)),
+   ...     # Pcent_
+   ...     (lambda Pcent_:
+   ...         print(
+   ...           Pcent_.upper(),
+   ...           (':'),
+   ...           Pcent_)
+   ...     ),
    ...     ('abc')))
    A : a
    B : b
@@ -2054,7 +2178,7 @@ But there are times when a function will not do:
 
 This macro is a metaprogram that creates a one-argument lambda.
 This is an example of intentional capture.
-The anaphor [#capture]_ is ``#``.
+The anaphor [#capture]_ is ``%``.
 Try doing that in Python.
 You can get pretty close with higher-order functions,
 but you can't delay the evaluation of the `.upper()<str.upper>`
@@ -2063,28 +2187,33 @@ which really negates the whole point of creating a shorter lambda.
 
 Delaying (and then reordering, repeating or skipping)
 evaluation is one of the main uses of macros.
-You can do that much with a lambda in Python.
+While you can't make them shorter,
+you can do that much with a lambda in Python.
 But advanced macros can do other things:
-inject anaphors,
 introduce new bindings,
 do a find-and-replace on symbols in code,
+check for errors at compile time,
 implement whole DSLs,
 or all of these at once.
 You have full programmatic control over the *code itself*,
 with the full power of Python's ecosystem.
 
-These techniques will be covered in more detail in the `macro tutorial <macro_tutorial>`.
+These techniques will be covered in more detail in the `macro_tutorial`.
 
 Compiling Packages
 ==================
 
 It isn't always necessary to create a compiled file.
 While you could compile it to Python first,
-you can run a ``.lissp`` file directly as the main module using ``hissp``::
+you can run a ``.lissp`` file directly as the main module using ``hissp``,
+
+.. code-block:: console
 
    $ python -m hissp foo.lissp
 
-Or::
+or
+
+.. code-block:: console
 
    $ lissp foo.lissp
 
@@ -2097,30 +2226,52 @@ with the name of each top-level ``.lissp`` file,
 or ``.lissp`` file in the corresponding package,
 respectively::
 
-   from hissp.reader import transpile
+   import hissp
 
-   transpile(__package__, "spam", "eggs", "etc")
+   hissp.transpile(__package__, "spam", "eggs", "etc")
 
 Or equivalently in Lissp, used either at the REPL or if the main module is written in Lissp:
 
 .. code-block:: Lissp
 
-   (hissp.reader..transpile __package__ 'spam 'eggs 'etc)
+   (hissp..transpile __package__ 'spam 'eggs 'etc)
 
-This will automatically compile each named Lissp module.
-This approach gives you fine-grained control over what gets compiled when.
-If desired, you can remove a name passed to the `transpile()`
-call to stop recompiling that file.
-Then you can compile the file manually at the REPL as needed using `transpile()`.
+This will automatically compile each named Lissp module,
+which gives you fine-grained control over what gets compiled when.
 
-Note that you usually *would* want to recompile the whole project
-rather than only the changed files on import like Python does for ``.pyc`` files,
-because macros run at compile time.
+.. sidebar:: The Lissp source for `hissp.macros`
+
+   is included in the distributed Hissp package for completeness,
+   but Hissp doesn't automatically recompile it on import.
+   If you do make edits, don't forget to recompile!
+
+Before distributing a Lissp project to users who won't be modifying it,
+compilation could be disabled or removed altogether,
+especially when not distributing the ``.lissp`` sources.
+If you don't want the ``hissp`` package to be a dependency
+(the :term:`standalone property`),
+make sure you remove or disable imports of it as well.
+For example, compilation (and :mod:`hissp` imports)
+could be conditioned on an environment variable
+or something set with the `site` hook.
+
+.. Note::
+   You normally *do* want to recompile the whole project during development.
+   CPython only needs to recompile any changed ``.py`` files to ``.pyc``,
+   but because macros run at compile time,
+   this wouldn't work well for Lissp.
+
 Changing a macro in one file normally doesn't affect the code that uses
 it in other files until they are recompiled.
 That is why `transpile()` will recompile the named files unconditionally.
 Even if the corresponding source has not changed,
 the compiled output may be different due to an updated macro in another file.
+
+Fortunately, Lissp compilation is usually pretty fast,
+but if desired (perhaps due to a slow macro),
+you can remove a name passed to the `transpile()`
+call to stop recompiling that file.
+Then you can compile the file manually at the REPL as needed using `transpile()`.
 
 Unicode Normalization
 =====================
@@ -2186,20 +2337,17 @@ Remember our first munging example?
 Notice that the compiled Python is pure ASCII in this case.
 This example couldn't work if the munger didn't normalize symbols,
 because ``setattr()`` would store the Unicode ``𝐀`` in ``spam``'s ``__dict__``,
-but ``spam.𝐀`` would do the same thing as ``spam.A``, and there's no such attribute.
+but ``spam.𝐀`` would do the same thing as ``spam.A``,
+and there would be no such attribute.
 
 .. rubric:: Footnotes
 
-.. [#EOF] End Of File. Usually Ctrl-D, but enter Ctrl-Z on Windows.
-          This doesn't quit Python if the REPL was launched from Python,
-          unlike ``(exit)``.
-
-.. [#key] The equivalent concept is called a *keyword* in other Lisps,
-          but that means something else in Python.
-
-.. [#LambdaList] The equivalent concept is called the "lambda list" in Common Lisp,
-   and the "params vector" in Clojure,
-   but Hissp is made of tuples, not linked-lists or vectors, hence "parameters tuple".
-
-.. [#capture] When symbol capture is done on purpose, these are known as *anaphoric macros*.
+.. [#capture] In natural language,
+   anaphors are words used to avoid repetition,
+   and they refer to something contextually.
+   Pronouns are one example.
+   When symbol capture is done on purpose in Lisp,
+   these are known as *anaphoric macros*,
+   and the bound name is called an *anaphor*,
+   which is often chosen to be a pronoun word.
    (When it's done on accident, these are known as *bugs*.)

@@ -1,0 +1,152 @@
+<!--
+This documentation is part of the Hissp project repository.
+https://github.com/gilch/hissp
+(C) 2026 Matthew Egan Odendahl
+SPDX-License-Identifier: Apache-2.0
+-->
+
+# Changes
+
+## [0.5.dev1]
+
+### Add
+- `cxl#` alias for `contextlib.`.
+- `:#` alias for `unittest.mock..sentinel`
+- `set[#` and `zap[#` no longer require `||` in a `doto`,
+  which is no longer recommended, but still works.
+  - Use a two-argument tag instead,
+    which results in a partial application taking a table.
+- `hissp.apropos` to scan for imported symbols.
+- `Q##` two-argument overload.
+- `H#compiler.delambda` and `H#compiler.dequote` for destructuring lambda and quote forms in macros.
+- Map overload for alias tags. Apply to a `(%`- form to qualify its keys.
+- Add `<o-` 'Backthread' macro to compose macros with bodies.
+- Add `for-in` macro for generator expressions.
+
+### Breaking
+
+`any-map` is gone. Use `for-in` instead.
+`for-in` is lazy. For the old behavior, wrap in `any`.
+`any*map` is also gone. Use `for-in` and `let`, wrapped in `any`.
+
+Rename `-<>>` to `-o>`. Rename its anaphor `:<>` to `:o`.
+
+No once decorators in `deftypeonce`.
+Don't wrap the bases in a tuple.
+
+Remove useless `hissp..prelude#` and `hissp..alias#` tags.
+Use `(hissp..prelude)` and `(hissp..alias`- instead.
+
+`&#` is now forked compose,
+which can still be used for partial application.
+Quote arguments where required or use `ft#partial` instead.
+
+`[#`, `!#`, and, `@#` no longer require `&#` when used alone.
+
+`!#` now requires application.
+ - `!##1 X` becomes `(!#1 X)` or `[##1] X`.
+Extra args instead do extra lookups, returning a tuple.
+
+`:@##` is now an overload of `@#`,
+which accepts a kwarg instead.
+- `@##'foo(expr)` becomes `@#foo=(expr)`.
+- `:@##decorator (def` becomes `@##decorator (def`.
+- `@##spam(expr)` becomes `(@#spam (expr))`.
+- `@##'spam.eggs(expr)` becomes `(@#'spam.eggs (expr))` or `@#eggs=@#spam=(expr)`.
+
+Make `hissp._macro_` a class.
+(The compiler still accepts any namespace type.)
+Inherit rather than copy, as was recommended for readerless mode.
+Use Python's multiple inheritance to "import" multiple `_macro_` classes.
+The method resolution order will determine precedence.
+
+Eliminate the ugly `Qz_` format. Munging is prettier.
+Munged names are much more usable from Python or with alternate readers.
+Munged characters begin with a capital letter and end with an underscore:
+- `🐍` to `Snake_`.
+
+Words in multiword names end in `X`, but hyphens become `H`:
+- `▲` to `BlackXupHpointingXtriangleX_`
+
+Unnamed characters still use a hex code, but begin with `Ox`.
+(That's not a zero, because identifiers can't start with a digit.)
+
+Some of the ASCII short names have changed.
+Kebabs munge with `___` (three underscores),
+but isolated or repeated `-` use the short name `Dash_`:
+- `if-else` to `if___else`
+- `->` to `Dash_Gt_`
+
+Demunging still works.
+Munged names are still distinct from `UPPER_CASE` and `snake_case`.
+They're less distinct from `CapWords` used by class names,
+only distinguished by the trailing underscore in the case of a single-character name,
+which Pythonic code sometimes uses to avoid a conflict.
+The need for this is especially rare for class names, however.
+
+Gensyms start with a prefix like `_gABCDEFGH__`.
+
+`QzMaybe_` is gone and no longer required for recursive macros.
+`(_macro_.foo)` is now a valid macro form,
+and works even if `_macro_` is shadowed by a local.
+To call a macro function at run time,
+use an identity form like `((|| _macro_.foo))` to avoid putting the symbol in the invocation position.
+
+Simplify `alias` macro.
+It no longer expects control world arguments for `_macro_`.
+In the case of an aliased macros name,
+the compiler now checks that namespace anyway.
+In the case of aliased tags names,
+`alias` writes logic to add `_macro_` (and `#`):
+- `H##b"bytes"`
+
+Make `.#` multiary.
+The interpretation is that the first argument evaluates to a callable applied to the remaining arguments.
+(Similar to `pass:` in Hebigo.)
+This allows non-symbol expressions to be used as tags.
+For example, functions used as tags can be abbreviated with an alias:
+```
+.##bn#dict((1 2)(3 4))
+;; same as
+builtins..dict#((1 2)(3 4))
+```
+
+`let` takes params then args.
+To get the old behavior,
+use defaults and empty args:
+```
+(let (x 1
+      y 2)
+  (print x y))
+;; becomes
+(let (: x 1 ; default params
+        y 2): ; A : is an empty call, like (:).
+  (print x y))
+;; or
+(let xy (1 2) ; You can use a params symbol, like lambda.
+  (print x y))
+```
+`let` can now do packing/unpacking like a call.
+
+Replace
+- `let-from` with `let`.
+- `let*from` with nested `let` (use `<o-`).
+- `loop-from` with `let-again`.
+
+See updated API docs. Use `(: :*`-`)` for the old behavior, e.g.,
+```lisp
+(let-from (a b : :* cs) 'abcdefg
+  (print a b cs))
+;; becomes
+(let (a b : :* cs)
+     (: :* 'abcdefg)
+  (print a b cs))
+```
+
+`let-again` takes pairs instead of an initial iterable.
+The `recur-from` anaphor has been replaced with `again-with`,
+but works the same.
+
+### Fix
+- kwarg token escape handling [#277](https://github.com/gilch/hissp/issues/277).
+- REPL fragment continuation issue (e.g., `#> |if 1:|` errors and `#> |if 1:1|` completes now).

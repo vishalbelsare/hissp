@@ -1,24 +1,26 @@
-.. Copyright 2020, 2021 Matthew Egan Odendahl
+.. Copyright 2020, 2021, 2022, 2023, 2024 Matthew Egan Odendahl
    SPDX-License-Identifier: CC-BY-SA-4.0
 
 Command Line Reference
-======================
+######################
 
 .. _lissp command:
 
 Lissp Command
--------------
+=============
 
-A normal install of the ``hissp`` package with ``pip`` and ``setuptools`` will
+A normal install of the ``hissp`` package will
 also install the ``lissp`` command-line tool for running Lissp code.
 This is a convenience executable for starting ``python -m hissp``,
 whose minimal options were modeled after Python's most commonly used:
+
+.. RELEASE: Update (Hissp X.X.X) line.
 
 .. code-block:: Text
 
    usage: lissp [-h] [-i] [-c cmd] [file] [args [args ...]]
 
-   Starts the REPL if there are no arguments.
+   (Hissp X.X.X) Starts the REPL if there are no arguments.
 
    positional arguments:
      file        Run this file as main script. (- for stdin.)
@@ -29,21 +31,39 @@ whose minimal options were modeled after Python's most commonly used:
      -i          Drop into REPL after the script.
      -c cmd      Run this string as main script (with prelude).
 
+Use the ``python -m hissp`` form instead of the ``lissp``
+tool for access to Python's other command-line opitons like `-O` to disable asserts,
+`-W` for warning control, etc.
+Some of these opitons have associated environment variables which can be used instead.
+
 The Lissp Compiler
-------------------
+==================
 
 The recommended way to compile Lissp modules is with
-`transpile <hissp.reader.transpile>` calls in ``__init__.py`` files (or the main module).
+`transpile <hissp.reader.transpile>` calls in ``__init__.py`` files
+for packaged modules,
+or in the main module for any modules not in a package.
 
-This can be done manually in the REPL.
-However, an external build system may need to use shell commands.
+One-offs are easy to do manually in the REPL using `refresh`,
+but an external build system may need to use shell commands.
 It is possible to run transpile commands in the shell via ``python -c`` or ``lissp -c``.
 
-For example, using `hissp.reader.transpile_file`,
+For example, using `hissp.reader.transpile`, a package name, and module names,
 
-.. code-block:: shell
+.. code-block:: console
 
-   $ alias lisspc="lissp -c '(hissp.reader..transpile_file : :* (getitem sys..argv (slice 1 None)))'"
-   $ lisspc spam.lissp
-   $ cd foopackage
-   $ lisspc eggs.lissp foopackage
+   $ alias lisspt="lissp -c '(H#transpile : :* [##1:] sys..argv)'"
+   $ lisspt pkg foo # Transpiles pkg/foo.lissp to pkg/foo.py in a package context.
+   $ lisspt pkg.sub foo # Transpiles pkg/sub/foo.lissp to .py in subpackage context.
+   $ lisspt "" foo bar # foo.lissp, bar.lissp to foo.py, bar.py without a package.
+
+or using `hissp.reader.transpile_file`, a file name, and a package name,
+
+.. code-block:: console
+
+   $ alias lissptf="lissp -c '(H#reader.transpile_file : :* [##1:] sys..argv)'"
+   $ lissptf spam.lissp # Transpile a single file without a package.
+   $ cd pkg
+   $ lissptf eggs.lissp pkg # must declare the package name
+   $ cd sub
+   $ lissptf ham.lissp pkg.sub # separate subpackage name with dot

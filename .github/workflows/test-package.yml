@@ -1,3 +1,6 @@
+# This configuration file is part of the Hissp source code repository,
+# copyright 2019, 2021, 2022, 2024, 2025 Matthew Egan Odendahl
+# SPDX-License-Identifier: Apache-2.0
 name: Test package
 
 on: [push]
@@ -8,12 +11,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v1
-    - name: Set up Python 3.8
+    - name: Checkout
+      uses: actions/checkout@v2
+    - name: Lint with black
+      uses: psf/black@stable
+    - name: Set up Python 3.10.20
       uses: actions/setup-python@v1
       with:
-        python-version: 3.8
-    - uses: actions/cache@v1
+        python-version: 3.10.20
+    - name: Cache pip
+      uses: actions/cache@v4
       with:
         path: ~/.cache/pip
         key: ${{ runner.os }}-pip-${{ hashFiles('requirements-dev.txt') }}
@@ -25,8 +32,9 @@ jobs:
         # stop the build if there are Python syntax errors or undefined names
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    - uses: actions/setup-node@v1
+        flake8 . --extend-ignore=E231,E203,E701,E272 --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    - name: Install Node.js
+      uses: actions/setup-node@v1
     - name: Lint with parlinter
       run: |
         npm install -g parlinter
@@ -36,19 +44,24 @@ jobs:
         parlinter --list-different "**/*.lissp"
     - name: Create Hissp package
       run: |
-        pip install setuptools
-        python setup.py sdist
+        pip install setuptools wheel
+        python setup.py bdist_wheel
     - name: Install Hissp package from dist/
       run: |
-        pip install dist/hissp-*.tar.gz
+        pip install setup/dist/hissp-*.whl
     - name: Install test dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements-dev.txt
     - name: Test install with pytest (including doctests)
+      env:
+        # Upgrades warnings to errors, so they get noticed.
+        # Currently turns off some in libraries due to Python 3.10 upgrade.
+        # These are not due to issues in Hissp itself, which has no dependencies.
+        # TODO: try upgrading libraries affected by deprecations.
+        PYTHONWARNINGS: error,default:SelectableGroups:DeprecationWarning:hypothesis.entry_points,default:A private pytest:DeprecationWarning:sybil.integration.pytest,default:pytest.collect.
       run: |
-        python -c "import tests"  # Compiles hissp.basic on package import.
-        pytest -v --cov=hissp --cov-report=xml --doctest-modules --doctest-glob *.md tests/ docs/ $(python -c "import hissp; print(hissp.__path__[0])")
+        pytest -p no:cacheprovider -v --cov=hissp --cov-report=xml --doctest-plus --doctest-glob *.md src/hissp/*.lissp tests/ docs/ $(python -c "import hissp; print(hissp.__path__[0])")
     - name: Codecov
       uses: codecov/codecov-action@v1.0.4
       with:

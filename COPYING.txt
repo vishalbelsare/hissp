@@ -1,0 +1,13 @@
+# Notice Regarding Separate Licensing of Documentation #
+
+See LICENSE.txt for the full text of the Apache-2.0 license.
+See docs/LICENSE.txt for the full text of the CC-BY-SA-4.0 license.
+
+Apache-2.0 applies to most of the repository, but CC-BY-SA-4.0 applies
+to most of the files in the docs/ directory. Check the individual files;
+which license applies is noted inside each near the top.
+
+The docs/hissp.svg and docs/H.svg logos are trademarks.
+
+(Hissp package-only distributions do not include the extra documentation
+or this notice.)

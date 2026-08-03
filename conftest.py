@@ -1,14 +1,22 @@
-# Copyright 2019, 2020 Matthew Egan Odendahl
+# Copyright 2019, 2020, 2022 Matthew Egan Odendahl
 # SPDX-License-Identifier: Apache-2.0
 
 import re
 from collections.abc import Container
+from difflib import context_diff
 from doctest import ELLIPSIS
 from fnmatch import fnmatch
 from textwrap import indent
+from unittest.mock import patch
 
 from sybil import Sybil
 from sybil.parsers.doctest import DocTestParser
+
+# Ensures we're testing the current version.
+with patch.dict("sys.modules"):
+    import hissp
+
+    hissp.transpile(hissp.__package__, "macros")
 
 from hissp.reader import Lissp
 
@@ -25,14 +33,21 @@ class ParseLissp(DocTestParser):
         super().__init__(*a, **kw)
         self._EXAMPLE_RE = re.compile(
             r"""
-        (?P<lissp>
-             (?:^   [ ]* [#]>[ ] .*)
-             (?:\n  [ ]* [#]\.\. .*)*)?
-             \n?
-         """
-            + self._EXAMPLE_RE.pattern,
+            (?P<lissp>
+                 (?:^   [ ]* [#]>[ ] .*)
+                 (?:\n  [ ]* [#]\.\. .*)*)?
+                 \n?
+            """ + self._EXAMPLE_RE.pattern,
             re.MULTILINE | re.VERBOSE,
         )
+
+    def __call__(self, document, *a, **kw):
+        assert type(document.text) is str
+        if document.path.endswith(".lissp"):
+            document.text = re.sub(
+                r"(?m)(^ *;+)", lambda m: " " * len(m[1]), document.text
+            )
+        return super().__call__(document, *a, **kw)
 
     def lissp(self, source):
         lissp = LISSP.match(source)
@@ -46,24 +61,36 @@ class ParseLissp(DocTestParser):
         lissp = self.lissp(example.document.text[example.start : example.end])
         if lissp:
             python = example.parsed.source
-            parser.compiler.ns = example.namespace
+            parser.compiler.env = example.namespace
             hissp = parser.reads(lissp)
             compiled = parser.compiler.compile(hissp) + "\n"
-            from difflib import context_diff
-            assert norm_gensym_eq(compiled, python), ''.join(
-                context_diff(
-                    indent(python, "  ").splitlines(True),
-                    indent(compiled, "  ").splitlines(True),
-                )
+            assert norm_gensym_eq(compiled, python), "".join(
+                [
+                    "  \nGENSYM-NORMALIZED DIFF:\n",
+                    *context_diff(
+                        norm_gensyms(python),
+                        norm_gensyms(compiled),
+                        fromfile="expected in doc",
+                        tofile="actually compiled to",
+                    ),
+                    "FULL COMPILATION:\n>>> ",
+                    compiled[:-1].replace("\n", "\n... "),
+                    "\n",
+                ]
             )
         return super().evaluate(example)
 
 
 def norm_gensym_eq(compiled, python):
-    """The special gensym suffix ``_QzNo..._`` will match regardless of number."""
+    """The special gensym prefix ``_g...__`` will match regardless of hash."""
     return re.fullmatch(
-        re.sub(r"_QzNo\d+_", r"_QzNo\\d+_", re.escape(python)), compiled
+        re.sub(r"_g[A-Z2-7]+__", R"_g[A-Z2-7]+__", re.escape(python)), compiled
     )
+
+
+def norm_gensyms(s):
+    s = re.sub(r"_g[A-Z2-7]+__", "_gABCDEFGH__", s)
+    return indent(s, " " * 2).splitlines(True)
 
 
 class Globs(Container):
@@ -75,5 +102,8 @@ class Globs(Container):
 
 
 pytest_collect_file = Sybil(
-    parsers=[ParseLissp(optionflags=ELLIPSIS)], filenames=Globs("*.md", "*.rst")
+    parsers=[ParseLissp(optionflags=ELLIPSIS)],
+    filenames=Globs("*.md", "*.rst", "*.lissp"),
 ).pytest()
+
+# RELEASE: Run all tests.

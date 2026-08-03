@@ -1,4 +1,4 @@
-# Copyright 2019, 2020, 2021 Matthew Egan Odendahl
+# Copyright 2019, 2020, 2021, 2022, 2023, 2024 Matthew Egan Odendahl
 # SPDX-License-Identifier: Apache-2.0
 
 """
@@ -7,36 +7,69 @@ The Hissp data-structure language compiler and associated helper functions.
 
 import ast
 import builtins
+import inspect
 import pickle
 import pickletools
-import re
 import sys
+from collections.abc import Iterable
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
-from functools import wraps
-from itertools import chain, takewhile, starmap
+from functools import partial, wraps
+from importlib import import_module
+from itertools import chain, starmap, takewhile
 from pprint import pformat
 from traceback import format_exc
-from types import ModuleType
-from typing import Iterable, List, NewType, Tuple, TypeVar, Union
+from types import ModuleType, SimpleNamespace
+from typing import Any, NewType, TypeAlias, TypeGuard, TypeVar
 from warnings import warn
 
 PAIR_WORDS = {":*": "*", ":**": "**", ":?": ""}
 # Module Macro container
 MACROS = "_macro_"
-# Macro from foreign module foo.bar.._macro_.baz
-MACRO = f"..{MACROS}."
-MAYBE = "..QzMaybe_."
-RE_MACRO = re.compile(rf"({re.escape(MACRO)}|{re.escape(MAYBE)})")
+_PARAM_INDENT = f"\n{len('(lambda ')*' '}"
 
-NS = ContextVar("NS", default=())
+Env: TypeAlias = dict[str, Any]
+ENV: ContextVar[Env] = ContextVar("ENV")
 """
-Sometimes macros need the current namespace when expanding,
-instead of its defining namespace.
+Expansion environment.
+
+Sometimes a macro needs the current environment when expanding,
+instead of its defining environment.
 Rather than pass in an implicit argument to all macros,
 it's available here.
-`readerless` uses this automatically.
+`readerless` and `macroexpand` use this automatically.
 """
+
+MAX_PROTOCOL = pickle.HIGHEST_PROTOCOL
+"""
+Compiler pickle protocol limit.
+
+When there is no known literal syntax for an `atom`,
+the compiler emits a `pickle.loads` expression as a fallback.
+This is the highest pickle protocol it's allowed to use.
+The compiler may use Protocol 0 instead when it has a shorter `repr`,
+due to the inefficient escapes required for non-printing bytes.
+
+A lower number may be necessary if the compiled output is expected to
+run on an earlier Python version than the compiler.
+"""
+
+
+@contextmanager
+def macro_context(env: Env):
+    """Sets `ENV` during macroexpansions.
+
+    Does nothing if ``env`` is already the current context.
+    """
+    if ENV.get(None) is env:
+        yield
+    else:
+        token = ENV.set(env)
+        try:
+            yield
+        finally:
+            ENV.reset(token)
+
 
 Sentinel = NewType("Sentinel", object)
 _SENTINEL = Sentinel(object())
@@ -48,15 +81,18 @@ class CompileError(SyntaxError):
 
 def _trace(method):
     @wraps(method)
-    def tracer(self, expr):
+    def tracer(self: "Compiler", expr) -> str:
         try:
             return method(self, expr)
         except Exception as e:
             self.error = e
             message = (
-                f"\nCompiler.{method.__name__}() {type(e).__name__}:\n {e}".replace(
-                    "\n", "\n# "
-                )
+                "\nCompiler.{}() {}:\n {}".format(
+                    method.__name__,
+                    type(e).__name__,
+                    format_exc() if method.__name__ == "macro" else e,
+                ).replace("\n", "\n# ")
+                + "\n"
             )
             return f"(>   >  > >>{pformat(expr)}<< <  <   <){message}"
 
@@ -64,7 +100,24 @@ def _trace(method):
 
 
 class PostCompileWarning(Warning):
-    """Form compiled to Python, but execution of it failed."""
+    """Form compiled to Python, but its execution failed.
+
+    Only possible when compiling in evaluate mode and not in ``__main__``.
+    Would be a "Hissp Abort!" instead when in ``__main__``, but other
+    modules can be allowed to continue compiling for debugging purposes.
+
+    Continuing execution after a failure can be dangerous if non-main
+    modules have side effects besides definitions. Warnings can be
+    upgraded to errors if this is a concern. See `warnings` for how.
+    """
+
+
+class _Empty_NS:
+    def __getattribute__(self, item):
+        raise AttributeError(item)
+
+
+_EMPTY_NS = _Empty_NS()
 
 
 class Compiler:
@@ -75,236 +128,288 @@ class Compiler:
     subset of Python.
     """
 
-    def __init__(self, qualname="__main__", ns=None, evaluate=True):
-        self.qualname = qualname
-        self.ns = self.new_ns(qualname) if ns is None else ns
-        self.evaluate = evaluate
-        self.error = False
-        self.abort = False
+    def __init__(
+        self, qualname: str = "__main__", env: Env | None = None, evaluate: bool = True
+    ):
+        self.qualname: str = qualname
+        self.env: Env = self.new_env(qualname) if env is None else env
+        self.evaluate: bool = evaluate
+        self.error: Exception | None = None
+        self.abort: str | None = None
 
     @staticmethod
-    def new_ns(name, doc=None, package=None):
-        """Creates and initializes a dict namespace like a module,
-        with the given `__name__`, ``__doc__``, and `__package__`;
-        ``__builtins__``; an empty ``__annotations__``; and whatever
-        else Python currently adds to new module objects.
+    def new_env(name: str, doc: str | None = None) -> Env:
+        """
+        "Imports" the named module, creating it if necessary.
+
+        Dynamically created modules have a ``None`` ``__spec__``.
+        After creating the `types.ModuleType` using name and doc,
+        it initializes an empty ``__annotations__``,
+        a ``__package__`` based on name (assumes module is not itself
+        a package), and a ``__builtins__``.
+
+        Returns the module's ``__dict__``.
         """
         mod = ModuleType(name, doc)
         mod.__annotations__ = {}
-        mod.__package__ = package
+        mod.__package__ = name.rpartition(".")[0]
         mod.__builtins__ = builtins
+        if name != "__main__":
+            mod = sys.modules.setdefault(name, mod)
         return vars(mod)
 
     def compile(self, forms: Iterable) -> str:
         """
         Compile multiple forms, and execute them if evaluate mode enabled.
         """
-        result: List[str] = []
-        for form in forms:
-            form = self.form(form)
+        result: list[str] = []
+        for i, form in enumerate(forms, 1):
+            form = self.compile_form(form)
             if self.error:
                 e = self.error
-                self.error = False
+                self.error = None
                 raise CompileError("\n" + form) from e
-            result.extend(self.eval(form))
+            result.extend(self.eval(form, i))
             if self.abort:
-                print("\n\n".join(result), file=sys.stderr)
-                self.abort = False  # To allow REPL debugging.
+                print("Hissp abort!", self.abort, sep="\n", file=sys.stderr)
+                self.abort = None  # To allow REPL debugging.
                 sys.exit(1)
         return "\n\n".join(result)
 
     @_trace
-    def form(self, form) -> str:
+    def compile_form(self, form) -> str:
         """
-        Compile Hissp form to the equivalent Python code in a string.
+        Compile Hissp `form` to the equivalent Python code in a string.
         `tuple` and `str` have special evaluation rules,
         otherwise it's an `atom` that represents itself.
         """
-        if type(form) is tuple and form:
-            return self.tuple(form)
-        if type(form) is str and not form.startswith(":"):
-            return self.str(form)
-        return self.atom(form)
+        if is_node(form):
+            return self.tuple_(form)
+        if is_str(form) and not form.startswith(":"):
+            return self.fragment(form)
+        return self.atomic(form)
 
     @_trace
-    def tuple(self, form: Tuple) -> str:
+    def tuple_(self, form: tuple) -> str:
         """Compile `call`, `macro`, or `special` forms."""
-        head, *tail = form
-        if type(head) is str:
-            return self.special(form)
+        match form:
+            case [["lambda", params, *body] as head] if (
+                is_node(head)
+            ) and not self.parameters(params):
+                return self.body(body)  # progn optimization
+            case head, *_ if is_str(head):
+                return self.special(form)
         return self.call(form)
 
     @_trace
-    def special(self, form: Tuple) -> str:
-        """Try to compile as special form, else `invocation`."""
+    def special(self, form: tuple) -> str:
+        """Try to compile as a `special form`, else :meth:`invocation`.
+
+        The two special forms are ``quote`` and `lambda <lambda_>`.
+
+        A quote form evaluates to its argument, treated as literal data,
+        not evaluated. Notice the difference in the `readerless`
+        compiled output:
+
+        >>> print(readerless(('print',42,)))  # function call
+        print(
+          (42))
+        >>> print(readerless(('quote',('print',42,),)))  # tuple
+        ('print',
+         (42),)
+
+        """
         if form[0] == "quote":
-            return self.atom(*form[1:])
+            return self.atomic(*form[1:])
         if form[0] == "lambda":
-            return self.function(form)
+            return self.lambda_(form)
         return self.invocation(form)
 
     @_trace
-    def function(self, form: Tuple) -> str:
-        r"""
-        Compile the anonymous function special form.
+    def lambda_(self, form: tuple) -> str:
+        R"""
+        Compile the anonymous function `special form`.
 
         (lambda (<parameters>)
           <body>)
 
-        The parameters tuple is divided into (<single> : <paired>)
+        The ``parameters tuple`` is divided into (<singles> : <pairs>)
 
         Parameter types are the same as Python's.
         For example,
 
-        >>> readerless(
-        ... ('lambda', ('a',':/','b',
-        ...             ':', 'e',1, 'f',2,
-        ...             ':*','args', 'h',4, 'i',':?', 'j',1,
-        ...             ':**','kwargs',),
-        ...   42,),
-        ... )
-        '(lambda a,/,b,e=(1),f=(2),*args,h=(4),i,j=(1),**kwargs:(42))'
+        >>> print(readerless(
+        ... ('lambda', ('a',':/','b'
+        ...            ,':', 'e',1, 'f',2
+        ...            ,':*','args', 'h',4, 'i',':?', 'j',1
+        ...            ,':**','kwargs',)
+        ...  ,42,)
+        ... ))
+        (
+         lambda a,
+                /,
+                b,
+                e=(1),
+                f=(2),
+                *args,
+                h=(4),
+                i,
+                j=(1),
+                **kwargs:
+            (42))
 
-        The special control words ``:*`` and ``:**`` designate the
+
+        The special `control word`\ s ``:*`` and ``:**`` designate the
         remainder of the positional and keyword parameters, respectively.
+
         Note this body evaluates expressions in sequence, for side
-        effects.
+        effects:
 
         >>> print(readerless(
-        ... ('lambda', (':',':*','args',':**','kwargs',),
-        ...   ('print','args',),
-        ...   ('print','kwargs',),),
+        ... ('lambda', (':',':*','args',':**','kwargs',)
+        ...  ,('print','args',)
+        ...  ,('print','kwargs',),)
         ... ))
-        (lambda *args,**kwargs:(
-          print(
-            args),
-          print(
-            kwargs))[-1])
+        (lambda *args, **kwargs:
+           (print(
+              args),
+            print(
+              kwargs))  [-1]
+        )
 
         You can omit the right of a pair with ``:?``
         (except the final ``**kwargs``).
         Also note that the body can be empty.
 
-        >>> readerless(
+        >>> print(readerless(
         ... ('lambda', (':','a',1, ':/',':?', ':*',':?', 'b',':?', 'c',2,),),
-        ... )
-        '(lambda a=(1),/,*,b,c=(2):())'
+        ... ))
+        (
+         lambda a=(1),
+                /,
+                *,
+                b,
+                c=(2):
+            ())
 
         The ``:`` may be omitted if there are no paired parameters.
 
-        >>> readerless(('lambda', ('a','b','c',':',),),)
-        '(lambda a,b,c:())'
-        >>> readerless(('lambda', ('a','b','c',),),)
-        '(lambda a,b,c:())'
+        >>> print(readerless(('lambda', ('a','b','c',':',),),))
+        (lambda a, b, c: ())
+        >>> print(readerless(('lambda', ('a','b','c',),),))
+        (lambda a, b, c: ())
         >>> readerless(('lambda', (':',),),)
-        '(lambda :())'
+        '(lambda : ())'
         >>> readerless(('lambda', (),),)
-        '(lambda :())'
+        '(lambda : ())'
 
-        The ``:`` is required if there are any paired parameters, even
+        The ``:`` is required if there are any pair parameters, even
         if there are no single parameters:
 
         >>> readerless(('lambda', (':',':**','kwargs',),),)
-        '(lambda **kwargs:())'
+        '(lambda **kwargs: ())'
 
         """
         fn, parameters, *body = form
         assert fn == "lambda"
-        return f"(lambda {','.join(self.parameters(parameters))}:{self.body(body)})"
+        sep = (len(body) <= 1) * " "
+        parameters, body = self.parameters(parameters), self.body(body)
+        param_has_nl, body_has_nl = "\n" in parameters, "\n" in body
+        begin, end = param_has_nl * "\n ", body_has_nl * "\n"
+        middle = (body_has_nl or param_has_nl) * f"\n{3*' '}"
+        body = body.replace("\n", f"\n{3*' '}{sep}")
+        return f"({begin}lambda {parameters}:{middle}{sep}{body}{end})"
 
     @_trace
-    def parameters(self, parameters: Iterable) -> Iterable[str]:
-        """Process parameters to compile `function`."""
+    def parameters(self, parameters: Iterable) -> str:
+        """Process `params` to compile `lambda_`."""
         parameters = iter(parameters)
-        yield from (
+        r = [
             {":/": "/", ":*": "*"}.get(a, a)
             for a in takewhile(lambda a: a != ":", parameters)
-        )
+        ]
+        sep = ", "
         for k, v in _pairs(parameters):
             if k == ":*":
-                yield "*" if v == ":?" else f"*{v}"
+                r.append("*" if v == ":?" else f"*{v}")
             elif k == ":/":
-                yield "/"
+                r.append("/")
             elif k == ":**":
-                yield f"**{v}"
+                r.append(f"**{v}")
             elif v == ":?":
-                yield k
+                r.append(k)
             else:
-                yield f"{k}={self.form(v)}"
+                r.append(f"{k}={self.compile_form(v)}")
+                sep = ",\n"
+        return sep.join(r).replace("\n", _PARAM_INDENT)
 
     @_trace
-    def body(self, body: list) -> str:
-        """Compile body of `function`."""
+    def body(self, body: Iterable) -> str:
+        """Compile body of `lambda_`."""
+        body = tuple(map(self.compile_form, body))
         if len(body) > 1:
-            return f"({_join_args(*map(self.form, body))})[-1]"
-        if not body:
-            return "()"
-        result = self.form(body[0])
-        return ("\n" * ("\n" in result) + result).replace("\n", "\n  ")
+            result = ",\n".join(body).replace("\n", "\n ")
+            return f"({result})  [-1]"
+        return f"{body and body[0]}"
 
     @_trace
-    def invocation(self, form: Tuple) -> str:
+    def invocation(self, form: tuple) -> str:
         """Try to compile as `macro`, else normal `call`."""
-        if (result := self.macro(form)) is not _SENTINEL:
-            return f"# {form[0]}\n{result}"
-        form = form[0].replace(MAYBE, "..", 1), *form[1:]
+        if (res := self.expand_macro(form)) is not _SENTINEL:
+            if res.startswith("#") and res.lstrip("#").startswith(f" {form[0]}\n"):
+                return f"#{res}"  # Abbreviate direct recursion.
+            return f"# {form[0]}\n{res}"
         return self.call(form)
 
     @_trace
-    def macro(self, form: Tuple) -> Union[str, Sentinel]:
-        """Macroexpand and start over with `form`, if it's a macro."""
+    def expand_macro(self, form: tuple) -> str | Sentinel:
+        """Macroexpand and start over with `compile_form`, if macro."""
         head, *tail = form
-        if (macro := self._get_macro(head)) is not None:
-            with self.macro_context():
-                return self.form(macro(*tail))
+        if (macro := self.get_macro(head, self.env)) is not None:
+            with macro_context(self.env):
+                return self.compile_form(macro(*tail))
         return _SENTINEL
 
-    def _get_macro(self, head):
-        parts = RE_MACRO.split(head, 1)
-        head = head.replace(MAYBE, MACRO, 1)
-        if len(parts) > 1:
-            return self._qualified_macro(head, parts)
-        return self._unqualified_macro(head)
+    @classmethod
+    def get_macro(cls, head: object, env: Env):
+        """Returns the macro function for ``symbol`` given the ``env``.
 
-    def _qualified_macro(self, head, parts):
-        try:
-            if parts[0] == self.qualname:  # Internal?
-                return vars(self.ns[MACROS])[parts[2]]
-            return eval(self.str(head))
-        except (KeyError, AttributeError):
-            if parts[1] != MAYBE:
-                raise
-
-    def _unqualified_macro(self, head):
-        try:
-            return vars(self.ns[MACROS])[head]
-        except KeyError:
-            pass
-
-    @contextmanager
-    def macro_context(self):
-        """Sets `NS` during macroexpansions."""
-        token = NS.set(self.ns)
-        try:
-            yield
-        finally:
-            NS.reset(token)
+        Returns ``None`` if ``symbol`` isn't a macro identifier.
+        """
+        if not is_symbol(head):
+            return None
+        # if "Plus_" in head and "Plus_" in vars(env.get(MACROS)): breakpoint()
+        parts = head.split(".")
+        ns = SimpleNamespace(M=MACROS, qn=env.get("__name__", "__main__"))
+        match parts:
+            case [name] | [ns.M, name] | [ns.qn, "", name] | [ns.qn, "", ns.M, name]:
+                return getattr(env.get(MACROS, _EMPTY_NS), name, None)
+            case [*handle, "", ns.M, name] | [*handle, "", name]:
+                try:
+                    module = import_module(".".join(handle))
+                except ImportError:
+                    return None
+                return getattr(getattr(module, MACROS, _EMPTY_NS), name, None)
 
     @_trace
     def call(self, form: Iterable) -> str:
-        r"""
+        R"""
         Compile call form.
 
         Any tuple that is not quoted, ``()``, or a `special` form or
-        `macro` is a run-time call.
+        `macro` is a run-time call form.
+        It has three parts:
 
-        Like Python, it has three parts:
-        (<callable> <args> : <kwargs>).
+        (<callable> <singles> : <pairs>).
+
+        Each argument pairs with a keyword or `control word` target.
+        The ``:?`` target passes positionally (implied for singles).
+
         For example:
 
         >>> print(readerless(
-        ... ('print',1,2,3,
-        ...          ':','sep',('quote',":",), 'end',('quote',"\n\n",),)
+        ... ('print',1,2,3
+        ...         ,':','sep',('quote',":",), 'end',('quote',"\n\n",),)
         ... ))
         print(
           (1),
@@ -313,7 +418,7 @@ class Compiler:
           sep=':',
           end='\n\n')
 
-        Either <args> or <kwargs> may be empty:
+        Either <singles> or <pairs> may be empty:
 
         >>> readerless(('foo',':',),)
         'foo()'
@@ -324,7 +429,7 @@ class Compiler:
         foo(
           bar=baz)
 
-        The ``:`` is optional if the <kwargs> part is empty:
+        The ``:`` is optional if the <pairs> part is empty:
 
         >>> readerless(('foo',),)
         'foo()'
@@ -332,10 +437,8 @@ class Compiler:
         foo(
           bar)
 
-        The <kwargs> part has implicit pairs; there must be an even number.
-
-        Use the control words ``:*`` and ``:**`` for iterable and
-        mapping unpacking:
+        Use the ``:*`` and ``:**`` targets for position and
+        keyword unpacking, respectively:
 
         >>> print(readerless(
         ... ('print',':',':*',[1,2], 'a',3, ':*',[4], ':**',{'sep':':','end':'\n\n'},),
@@ -346,13 +449,12 @@ class Compiler:
           *[4],
           **{'sep': ':', 'end': '\n\n'})
 
-        Unlike other control words, these can be repeated,
-        but (as in Python) a '*' is not allowed to follow '**'.
-
         Method calls are similar to function calls:
-        (.<method name> <object> <args> : <kwargs>)
-        Like Clojure, a method on the first object is assumed if the
-        function name starts with a dot:
+
+        (.<method name> <self> <args> : <kwargs>).
+
+        A method on the first (self) argument is assumed if the function
+        name starts with a dot:
 
         >>> readerless(('.conjugate', 1j,),)
         '(1j).conjugate()'
@@ -367,82 +469,93 @@ class Compiler:
         form = iter(form)
         head = next(form)
         args = chain(
-            map(self.form, takewhile(lambda a: a != ":", form)),
-            starmap(self._pair_arg, _pairs(form)),
+            (singles := [*map(self.compile_form, takewhile(lambda a: a != ":", form))]),
+            starmap(self._pair_arg, pairs := [*_pairs(form)]),
         )
-        if type(head) is str and head.startswith("."):
-            return "{}.{}({})".format(next(args), head[1:], _join_args(*args))
-        return "{}({})".format(self.form(head), _join_args(*args))
+        if is_str(head) and head.startswith("."):
+            if singles or pairs[0][0] == ":?":
+                return "{}.{}({})".format(next(args), head[1:], _join_args(*args))
+            raise CompileError("self must be paired with :?")
+        return "{}({})".format(self.compile_form(head), _join_args(*args))
 
-    def _pair_arg(self, k, v):
+    def _pair_arg(self, k: str, v) -> str:
         k = PAIR_WORDS.get(k, k + "=")
-        if '..' in k:
-            k = k.split('.')[-1]
-        return k + self.form(v).replace("\n", "\n" + " " * len(k))
+        if ".." in k:
+            k = k.split(".")[-1]
+        return k + self.compile_form(v).replace("\n", "\n" + " " * len(k))
 
     @_trace
-    def str(self, code: str) -> str:
-        """Compile code strings.
-        Expands qualified identifiers and module literals into imports.
-        Otherwise, injects as raw Python directly into the output.
+    def fragment(self, code: str) -> str:
+        """Compile a `fragment atom`.
+        This preprocessing step converts a `fully qualified identifier`
+        or `module handle` into an import. No further compilation is
+        necessary. The contents are assumed to be Python code already.
         """
+        return self._fragment(self.qualname, code)
+
+    @classmethod
+    def _fragment(cls, qualname: str, code: str) -> str:
+        if "..." in code:
+            return code
         if not all(s.isidentifier() for s in code.split(".") if s):
             return code
         if ".." in code:
-            return self.qualified_identifier(code)
+            return cls.qualified_identifier(qualname, code)
         elif code.endswith("."):
-            return self.module_identifier(code)
+            return cls.module_identifier(code)
         return code
 
-    def qualified_identifier(self, code):
-        """Compile qualified identifier into import and attribute."""
+    @staticmethod
+    def qualified_identifier(qualname: str, code: str) -> str:
+        """Compile `fully qualified identifier` into import and attribute."""
         parts = code.split("..", 1)
-        if parts[0] == self.qualname:  # This module. No import required.
+        if parts[0] == qualname:  # This module. No import required.
             chain = parts[1].split(".", 1)
             # Avoid local shadowing.
-            chain[0] = f"__import__('builtins').globals()[{self.atom(chain[0])}]"
+            chain[0] = f"__import__('builtins').globals()[{pformat(chain[0])}]"
             return ".".join(chain)
         return "__import__({0!r}{fromlist}).{1}".format(
-            parts[0], parts[1], fromlist=",fromlist='?'" if "." in parts[0] else ""
+            parts[0], parts[1], fromlist=",fromlist='*'" if "." in parts[0] else ""
         )
 
-    def module_identifier(self, code):
-        """Compile module identifier to import."""
+    @staticmethod
+    def module_identifier(code: str) -> str:
+        """Compile a `module handle` to an import."""
+        assert code[-1] == "."
         module = code[:-1]
-        return f"""__import__({module !r}{",fromlist='?'" if "." in module else ""})"""
+        return f"""__import__({module !r}{",fromlist='*'" if "." in module else ""})"""
 
     @_trace
-    def atom(self, form) -> str:
-        r"""
+    def atomic(self, form) -> str:
+        R"""
         Compile forms that evaluate to themselves.
 
-        Emits a literal if possible, otherwise falls back to `pickle`:
+        Returns a literal if possible, otherwise falls back to `pickle`:
 
         >>> readerless(-4.2j)
         '((-0-4.2j))'
         >>> print(readerless(float('nan')))
-        __import__('pickle').loads(  # nan
-            b'Fnan\n.'
-        )
+        # nan
+        __import__('pickle').loads(b'Fnan\n.')
         >>> readerless([{'foo':2},(),1j,2.0,{3}])
         "[{'foo': 2}, (), 1j, 2.0, {3}]"
         >>> spam = []
         >>> spam.append(spam)  # ref cycle can't be a literal
         >>> print(readerless(spam))
-        __import__('pickle').loads(  # [[...]]
-            b'(lp0\ng0\na.'
-        )
+        # [[...]]
+        __import__('pickle').loads(b'(lp0\ng0\na.')
         >>> spam = [[]] * 3  # duplicated refs
         >>> print(readerless(spam))
-        __import__('pickle').loads(  # [[], [], []]
-            b'(l(lp0\nag0\nag0\na.'
-        )
+        # [[], [], []]
+        __import__('pickle').loads(b'(l(lp0\nag0\nag0\na.')
 
         """
         if form is Ellipsis:
-            return "..."
+            return "..."  # "Ellipsis" could be shadowed.
         case = type(form)
-        if case is tuple and form:
+        if case is set and not form:
+            return "{*''}"  # "set()" could be shadowed. "{}" is a dict.
+        if is_node(form):
             return self._lisp_normal_form(form)
         if case in {dict, list, set}:
             return self._collection(form)
@@ -452,75 +565,349 @@ class Compiler:
         # literal failed to round trip. Fall back to pickle.
         return self.pickle(form)
 
-    def _lisp_normal_form(self, form):
-        return "({},)".format(",\n".join(map(self.atom, form)).replace("\n", "\n "))
+    def _lisp_normal_form(self, form: tuple) -> str:
+        return "({},)".format(",\n".join(map(self.atomic, form)).replace("\n", "\n "))
 
-    def _collection(self, form):  # Use literal if it reproduces the object graph.
+    def _collection(self, form: dict | list | set) -> str:
         pickled = self.pickle(form)
         pretty = pformat(form, sort_dicts=False)
         evaled = self._try_eval(pretty)
         if evaled == form and pickled == self.pickle(evaled):
-            return pretty
+            return pretty  # Literal if it reproduces the object graph.
         return pickled
 
     @staticmethod
-    def _format_repr(case, form):
+    def _format_repr(case: type, form: object) -> str:
         if case in {int, float, complex}:
             return f"({form!r})"  # Number literals may need (). E.g. (1).real
         return pformat(form)  # Pretty print for multiline strings.
 
     @staticmethod
-    def _try_eval(literal):
+    def _try_eval(literal: str):
         with suppress(ValueError, SyntaxError):
             return ast.literal_eval(literal)
 
     @_trace
-    def pickle(self, form) -> str:
-        """Compile to `pickle.loads`. The final fallback for `atom`."""
-        # 0 is the "human-readable" backwards-compatible text protocol.
-        dumps = pickletools.optimize(pickle.dumps(form, 0, fix_imports=False))
+    def pickle(self, form: object) -> str:
+        """Compile to `pickle.loads`. The final fallback for `atomic`."""
+        protocols = 0, MAX_PROTOCOL
+        pickles = []
+        for p in protocols:
+            # A protocol that can't represent the form isn't a candidate,
+            # but a higher one still might be. E.g. protocol 0 can't pickle
+            # an object of a class defining __slots__ without __getstate__.
+            with suppress(Exception):
+                pickles.append(repr(pickletools.optimize(pickle.dumps(form, p))))
+        if not pickles:
+            pickle.dumps(form, MAX_PROTOCOL)  # Raise the relevant error.
+        code = min(pickles, key=len)
         r = repr(form).replace("\n", "\n  # ")
-        nl = "\n" if "\n" in r else ""
-        return f"__import__('pickle').loads({nl}  # {r}\n    {dumps!r}\n)"
+        return f"# {r}\n__import__({pickle.__name__!r}).loads({code})"
 
-    def eval(self, form: str) -> Tuple[str, ...]:
-        """Execute compiled form, but only if evaluate mode is enabled."""
+    @staticmethod
+    def linenos(code: str) -> str:
+        """Adds line numbers to code for error messages."""
+        lines = code.split("\n")
+        digits = len(str(len(lines)))
+        return "\n".join(f"{i:0{digits}} {line}" for i, line in enumerate(lines, 1))
+
+    def eval(self, code: str, form_number: int) -> tuple[str] | tuple[str, str]:
+        """Execute compiled code, but only if evaluate mode is enabled."""
         try:
             if self.evaluate:
-                exec(compile(form, "<Hissp>", "exec"), self.ns)
+                filename = (
+                    f"<Compiled Hissp #{form_number} of {self.qualname}:\n"
+                    f"{self.linenos(code)}\n"
+                    f">"
+                )
+                exec(compile(code, filename, "exec"), self.env)
         except Exception as e:
             exc = format_exc()
-            if self.ns.get("__name__") == "__main__":
-                self.abort = True
+            if self.env.get("__name__") == "__main__":
+                self.abort = exc
             else:
                 warn(
-                    f"\n {e} when evaluating form:\n{form}\n\n{exc}", PostCompileWarning
+                    f"\n {e} when evaluating form:\n{code}\n\n{exc}", PostCompileWarning
                 )
-            return form, "# " + exc.replace("\n", "\n# ")
-        return (form,)
+            return code, "# " + exc.replace("\n", "\n# ")
+        return (code,)
 
 
-def _join_args(*args):
+def _join_args(*args: str) -> str:
     return (("\n" if args else "") + ",\n".join(args)).replace("\n", "\n  ")
 
 
 T = TypeVar("T")
 
 
-def _pairs(it: Iterable[T]) -> Iterable[Tuple[T, T]]:
+def _pairs(it: Iterable[T]) -> Iterable[tuple[T, T]]:
     it = iter(it)
     for k in it:
         try:
             yield k, next(it)
         except StopIteration:
-            raise CompileError("Incomplete pair.") from None
+            raise CompileError("incomplete pair") from None
 
 
-def readerless(form, ns=None):
+def _resolve_env(env: Env | None = None) -> Env:
+    if env is not None or (env := ENV.get(None)) is not None:
+        return env
+    return inspect.currentframe().f_back.f_back.f_globals
+
+
+def readerless(form: object, env: Env | None = None) -> str:
     """Compile a Hissp form to Python without evaluating it.
-    Uses the current `NS` for context, unless an alternative is provided.
-    (Creates a temporary namespace if neither is available.)
-    Returns the Python in a string.
+
+    Returns the compiled Python in a string.
+
+    Unless an alternative ``env`` is specified, uses the current `ENV`
+    (available in a `macro_context`) when available, otherwise uses the
+    calling frame's globals.
     """
-    ns = ns or NS.get() or {"__name__": "__main__"}
-    return Compiler(evaluate=False, ns=ns).compile([form])
+    return Compiler(env=_resolve_env(env), evaluate=False).compile([form])
+
+
+def evaluate(form: object, env: Env | None = None):
+    """Convenience function to evaluate a Hissp form.
+
+    Unless an alternative ``env`` is specified, uses the current `ENV`
+    (available in a `macro_context`) when available, otherwise uses the
+    calling frame's globals.
+
+    >>> evaluate(('operator..mul',6,7))
+    42
+    """
+    env = _resolve_env(env)
+    return eval(readerless(form, env), env)
+
+
+def execute(*forms: object, env: Env | None = None) -> str:
+    """Convenience function to compile and execute Hissp forms.
+
+    Returns the compiled Python in a string.
+
+    Unless an alternative ``env`` is specified, uses the current `ENV`
+    (available in a `macro_context`) when available, otherwise uses the
+    calling frame's globals.
+
+    >>> print(execute(
+    ...     ('hissp..define','FACTOR',7,),
+    ...     ('hissp..define','result',('operator..mul','FACTOR',6,),),
+    ... ))
+    # hissp..define
+    __import__('builtins').globals().update(
+      FACTOR=(7))
+    <BLANKLINE>
+    # hissp..define
+    __import__('builtins').globals().update(
+      result=__import__('operator').mul(
+               FACTOR,
+               (6)))
+    >>> result
+    42
+    """
+    return Compiler(env=(_resolve_env(env))).compile(forms)
+
+
+def is_str(form: object) -> TypeGuard[str]:
+    """Determines if form is a `str atom`. (Not a `str` subtype.)"""
+    return type(form) is str
+
+
+def is_node(form: object) -> TypeGuard[tuple]:
+    """Determines if form is a nonempty tuple (not an `atom`)."""
+    return type(form) is tuple and form != ()
+
+
+def dequote(form: object) -> tuple:
+    """Tries to destructure as a quote special form.
+
+    Returns a single containing the quoted element if valid,
+    else ().
+    """
+    match form:
+        case ["quote", x] if type(form) is tuple:
+            return (x,)
+    return ()
+
+
+def delambda(form: object) -> dict:
+    """Try to destructure as a lambda special form.
+
+    Returns a dict of params, singles, pairs, and body, if valid,
+    else {}. Does not validate params besides that they're Iterable.
+    (Constructing the pairs dict will fail with a TypeError if keys
+    aren't hashable, but those should be type str in a lambda form.)
+    """
+    match form:
+        case ["lambda", params, *body] if type(form) is tuple and isinstance(
+            params, Iterable
+        ):
+            singles, pairs = parse_params(params)
+            return {
+                "params": params,
+                "singles": singles,
+                "pairs": pairs,
+                "body": body,
+            }
+    return {}
+
+
+def is_symbol(form: object) -> TypeGuard[str]:
+    """Determines if form is a `symbol`.
+
+    Meaning, a `fragment atom` containing exactly a `module handle` or
+    an `identifier<str.isidentifier>` (possilby with `qualification`).
+
+    Examples:
+    >>> is_symbol("foo")  # Identifier.
+    True
+    >>> is_symbol("foo.bar")  # Qualified identifier.
+    True
+    >>> is_symbol("spam..foo")  # Fully qualified identifier.
+    True
+    >>> is_symbol("spam.eggs.bacon..foo.bar.baz")  # Package/namespace.
+    True
+    >>> is_symbol("True")  # Some identifiers are also literals.
+    True
+    >>> is_symbol("class")  # Reserved words are identifiers too.
+    True
+    >>> is_symbol("foo.")  # Module handles count.
+    True
+
+    Non-symbols:
+    >>> is_symbol(".foo")  # Method syntax doesn't. Not qualification.
+    False
+    >>> is_symbol(False)  # Needs to be a str type.
+    False
+    >>> is_symbol("not in")  # Not exactly. Counts as two identifiers.
+    False
+    >>> is_symbol("foo..")  # No identifier after separator.
+    False
+    >>> is_symbol("..foo")  # No qualifier before separator.
+    False
+    >>> is_symbol("..")  # Just a separator.
+    False
+    >>> is_symbol("...")  # This is an Ellipsis literal though.
+    False
+    >>> is_symbol("foo ")  # Not exactly. Note the space.
+    False
+    >>> is_symbol(" foo")  # Either side.
+    False
+    >>> is_symbol(" ")  # Space.
+    False
+    >>> is_symbol("")  # Empty.
+    False
+    >>> is_symbol("(foo)")  # Not an identifier string.
+    False
+    >>> is_symbol("foo.....bar")  # Invalid separator.
+    False
+    >>> is_symbol("foo..bar..baz")  # Too many separators.
+    False
+    """
+    return (is_str(form) and form != "" and not form.endswith("..")) and all(
+        part.isidentifier() for part in f"{form}_".replace("..", ".", 1).split(".")
+    )
+
+
+def is_import(form: object) -> TypeGuard[str]:
+    """Determines if form is a `module handle` or has `full qualification`."""
+    return is_symbol(form) and (".." in form or form.endswith("."))
+
+
+def is_control(form: object) -> TypeGuard[str]:
+    """Determines if form is a `control word`."""
+    return is_str(form) and form.startswith(":")
+
+
+def macroexpand1(form, env: Env | None = None):
+    """Macroexpand outermost form once.
+
+    If form is not a macro form, returns it unaltered.
+
+    Unless an alternative ``env`` is specified, uses the current `ENV`
+    (available in a `macro_context`) when available, otherwise uses the
+    calling frame's globals.
+    """
+    if not is_node(form) or form[0] in ["quote", "lambda"]:
+        return form
+    head, *tail = form
+    env = _resolve_env(env)
+    if (macro := Compiler.get_macro(form[0], env)) is None:
+        return form
+    with macro_context(env):
+        return macro(*tail)
+
+
+def macroexpand(form, env: Env | None = None, *, preprocess=lambda x: x):
+    """Repeatedly macroexpand outermost form until not a macro form.
+
+    If form is not a macro form, returns it unaltered.
+
+    Unless an alternative ``env`` is specified, uses the current `ENV`
+    (available in a `macro_context`) when available, otherwise uses the
+    calling frame's globals.
+
+    ``preprocess`` (which defaults to identity function) is called on
+    the form before each expansion step.
+    """
+    with macro_context(_resolve_env(env)):
+        while True:
+            form = preprocess(form)
+            expanded = macroexpand1(form)
+            if expanded is form:
+                return form
+            form = expanded
+
+
+def macroexpand_all(
+    form,
+    env: Env | None = None,
+    *,
+    preprocess=lambda x: x,
+    postprocess=lambda x: x,
+):
+    R"""Recursively macroexpand everything possible from the outside-in.
+
+    Pipes outer form through preprocess, :func:`macroexpand`, and
+    postprocess, then recurs into `subform`\ s of the resulting
+    expansion, if applicable.
+
+    Pre/postprocess are called with `macro_context` so, e.g.,
+    `macroexpand1` may be called by preprocess to handle intermediate
+    expansions.
+
+    If expansion is not a `macro form`, returns it.
+    As in the compiler, lambda parameter names are not considered
+    expandable subforms, but default expressions are.
+
+    Unless an alternative ``env`` is specified, uses the current `ENV`
+    (available in a `macro_context`) when available, otherwise uses the
+    calling frame's globals.
+    """
+    with macro_context(_resolve_env(env)):
+        exp = macroexpand(form, preprocess=preprocess)
+        if not is_node(exp) or exp[0] == "quote":
+            return postprocess(exp)
+        mx_a = partial(macroexpand_all, preprocess=preprocess, postprocess=postprocess)
+        if exp[0] != "lambda":
+            return postprocess((*map(mx_a, exp),))
+        return postprocess(("lambda", _pexpand(exp[1], mx_a), *map(mx_a, exp[2:])))
+
+
+def _pexpand(params: Iterable, mx_a: partial) -> Iterable:
+    if ":" not in params:
+        return params
+    singles, pairs = parse_params(params)
+    if not pairs.keys() - (":*", ":**"):
+        return params
+    pairs = {k: v if k in (":*", ":**") else mx_a(v) for k, v in pairs.items()}
+    return *singles, ":", *chain.from_iterable(pairs.items())
+
+
+def parse_params(params: Iterable) -> tuple[tuple, Env]:
+    """Parses a lambda form's `params` into a tuple of singles and a dict of pairs."""
+    iparams = iter(params)
+    singles = tuple(takewhile(lambda x: x != ":", iparams))
+    pairs = dict(zip(iparams, iparams, strict=True))
+    return singles, pairs
